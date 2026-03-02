@@ -14,6 +14,7 @@ function AdminSidebar({ active, onNavigate }) {
             { id: 'verifications', label: 'Verifications', icon: 'fa-clipboard-check', path: '/admin/verifications' },
             { id: 'distribution', label: 'Food Distribution', icon: 'fa-box-open', path: '/admin/distribution' },
             { id: 'attendees', label: 'Distribution Attendees', icon: 'fa-users-cog', path: '/admin/attendees' },
+            { id: 'communities', label: 'Communities', icon: 'fa-city', path: '/admin/communities' },
             { id: 'impact', label: 'Impact Data Entry', icon: 'fa-table', path: '/admin/impact' },
             { id: 'impact-content', label: 'Impact Content', icon: 'fa-heart', path: '/admin/impact-content' },
             { id: 'reports', label: 'Reports & Analytics', icon: 'fa-chart-bar', path: '/admin/reports' },

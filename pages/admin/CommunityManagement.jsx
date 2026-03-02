@@ -2,6 +2,39 @@ import React from 'react';
 import AdminLayout from './AdminLayout';
 import supabase from '../../utils/supabaseClient';
 import Button from '../../components/common/Button';
+import { toast } from 'react-toastify';
+
+// Direct REST helper to bypass RLS issues (same pattern as ImpactContentManagement)
+const supabaseRest = async (table, method = 'GET', body = null, filters = '') => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token || localStorage.getItem('supabase_access_token');
+  const supabaseUrl = supabase.supabaseUrl || 'https://ifzbpqyuhnxbhdcnmvfs.supabase.co';
+  const supabaseKey = supabase.supabaseKey || supabase._supabaseKey || localStorage.getItem('supabase_anon_key');
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'apikey': supabaseKey,
+    'Authorization': `Bearer ${token}`,
+    'Prefer': method === 'POST' ? 'return=representation' : method === 'PATCH' ? 'return=representation' : undefined
+  };
+  // Remove undefined headers
+  Object.keys(headers).forEach(k => headers[k] === undefined && delete headers[k]);
+
+  const url = `${supabaseUrl}/rest/v1/${table}${filters}`;
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`REST ${method} ${table} failed (${res.status}): ${errText}`);
+  }
+
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+};
 
 const CommunityManagement = () => {
   const [communities, setCommunities] = React.useState([]);
@@ -15,6 +48,9 @@ const CommunityManagement = () => {
     contact: '',
     phone: '',
     image: '',
+    hours: '',
+    latitude: '',
+    longitude: '',
     is_active: true
   });
 
@@ -71,53 +107,34 @@ const CommunityManagement = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (submitting) {
-      console.log('Already submitting, ignoring duplicate submission');
-      return;
-    }
-    
+    if (submitting) return;
     setSubmitting(true);
-    console.log('Submitting community data:', formData);
     
     try {
-      // Check authentication first
       const { data: { session } } = await supabase.auth.getSession();
-      console.log('Current session:', session ? 'Authenticated' : 'Not authenticated');
-      
-      if (!session) {
-        throw new Error('You must be logged in to add/edit communities. Please log in to the admin panel.');
-      }
+      if (!session) throw new Error('You must be logged in. Please log in to the admin panel.');
+
+      // Build payload, converting lat/lng to numbers if provided
+      const payload = {
+        name: formData.name,
+        location: formData.location,
+        contact: formData.contact,
+        phone: formData.phone,
+        image: formData.image || null,
+        hours: formData.hours || null,
+        latitude: formData.latitude ? parseFloat(formData.latitude) : null,
+        longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+        is_active: formData.is_active,
+        updated_at: new Date().toISOString()
+      };
       
       if (editingCommunity) {
-        // Update existing community
-        console.log('Updating community ID:', editingCommunity.id);
-        const { data, error } = await supabase
-          .from('communities')
-          .update(formData)
-          .eq('id', editingCommunity.id)
-          .select();
-
-        if (error) {
-          console.error('Update error:', error);
-          throw error;
-        }
-        console.log('Update successful:', data);
-        alert('Community updated successfully!');
+        await supabaseRest('communities', 'PATCH', payload, `?id=eq.${editingCommunity.id}`);
+        toast.success('Community updated successfully!');
       } else {
-        // Add new community
-        console.log('Inserting new community...');
-        const { data, error } = await supabase
-          .from('communities')
-          .insert([formData])
-          .select();
-
-        if (error) {
-          console.error('Insert error:', error);
-          console.error('Full error object:', JSON.stringify(error, null, 2));
-          throw new Error(`Database Error: ${error.message || 'Unknown error'}\nCode: ${error.code || 'N/A'}\nDetails: ${error.details || 'N/A'}\nHint: ${error.hint || 'N/A'}`);
-        }
-        console.log('Insert successful:', data);
-        alert('Community added successfully!');
+        payload.created_at = new Date().toISOString();
+        await supabaseRest('communities', 'POST', payload);
+        toast.success('Community added successfully!');
       }
 
       setShowModal(false);
@@ -128,18 +145,15 @@ const CommunityManagement = () => {
         contact: '',
         phone: '',
         image: '',
+        hours: '',
+        latitude: '',
+        longitude: '',
         is_active: true
       });
       fetchCommunities();
     } catch (error) {
       console.error('Error saving community:', error);
-      console.error('Error details:', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code
-      });
-      alert('Failed to save community: ' + error.message + '\n\nCheck console for details.');
+      toast.error('Failed to save community: ' + error.message);
     } finally {
       setSubmitting(false);
     }
@@ -153,6 +167,9 @@ const CommunityManagement = () => {
       contact: community.contact || '',
       phone: community.phone || '',
       image: community.image || '',
+      hours: community.hours || '',
+      latitude: community.latitude != null ? String(community.latitude) : '',
+      longitude: community.longitude != null ? String(community.longitude) : '',
       is_active: community.is_active !== false
     });
     setShowModal(true);
@@ -164,32 +181,23 @@ const CommunityManagement = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from('communities')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-      alert('Community deleted successfully!');
+      await supabaseRest('communities', 'DELETE', null, `?id=eq.${id}`);
+      toast.success('Community deleted successfully!');
       fetchCommunities();
     } catch (error) {
       console.error('Error deleting community:', error);
-      alert('Failed to delete community: ' + error.message);
+      toast.error('Failed to delete community: ' + error.message);
     }
   };
 
   const handleToggleActive = async (id, currentStatus) => {
     try {
-      const { error } = await supabase
-        .from('communities')
-        .update({ is_active: !currentStatus })
-        .eq('id', id);
-
-      if (error) throw error;
+      await supabaseRest('communities', 'PATCH', { is_active: !currentStatus, updated_at: new Date().toISOString() }, `?id=eq.${id}`);
+      toast.success(`Community ${currentStatus ? 'deactivated' : 'activated'}`);
       fetchCommunities();
     } catch (error) {
       console.error('Error toggling active status:', error);
-      alert('Failed to update active status');
+      toast.error('Failed to update active status');
     }
   };
 
@@ -201,6 +209,9 @@ const CommunityManagement = () => {
       contact: '',
       phone: '',
       image: '',
+      hours: '',
+      latitude: '',
+      longitude: '',
       is_active: true
     });
     setShowModal(true);
@@ -210,10 +221,13 @@ const CommunityManagement = () => {
     <AdminLayout active="communities">
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">
-            <i className="fas fa-users text-[#2CABE3] mr-3"></i>
-            Community Management
-          </h1>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">
+              <i className="fas fa-city text-[#2CABE3] mr-3"></i>
+              Community Management
+            </h1>
+            <p className="text-gray-500 mt-1">{communities.length} communit{communities.length === 1 ? 'y' : 'ies'} total</p>
+          </div>
           <Button onClick={handleAddNew}>
             <i className="fas fa-plus mr-2"></i>
             Add Community
@@ -224,6 +238,16 @@ const CommunityManagement = () => {
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2CABE3] mx-auto"></div>
             <p className="mt-4 text-gray-600">Loading communities...</p>
+          </div>
+        ) : communities.length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-12 text-center">
+            <i className="fas fa-city text-5xl text-gray-300 mb-4"></i>
+            <h3 className="text-xl font-semibold text-gray-600 mb-2">No Communities Yet</h3>
+            <p className="text-gray-500 mb-6">Get started by adding your first community.</p>
+            <Button onClick={handleAddNew}>
+              <i className="fas fa-plus mr-2"></i>
+              Add First Community
+            </Button>
           </div>
         ) : (
           <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -394,6 +418,54 @@ const CommunityManagement = () => {
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     Enter a URL to a community logo or image
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Operating Hours
+                  </label>
+                  <input
+                    type="text"
+                    name="hours"
+                    value={formData.hours}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#2CABE3] focus:border-[#2CABE3]"
+                    placeholder="e.g., Mon-Fri 9am-5pm"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Latitude
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      name="latitude"
+                      value={formData.latitude}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#2CABE3] focus:border-[#2CABE3]"
+                      placeholder="e.g., 37.8044"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Longitude
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      name="longitude"
+                      value={formData.longitude}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#2CABE3] focus:border-[#2CABE3]"
+                      placeholder="e.g., -122.2712"
+                    />
+                  </div>
+                  <p className="col-span-2 text-xs text-gray-500 -mt-2">
+                    Coordinates for map display. Use Google Maps to find lat/lng.
                   </p>
                 </div>
 
