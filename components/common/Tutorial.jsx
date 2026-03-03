@@ -44,7 +44,7 @@ const ALL_STEPS = [
         target: '[href="/impact-story"]',
         icon: 'fa-chart-line',
         title: 'Impact Story',
-        content: 'See the real-world impact of our community. Track meals served, families helped, and pounds of food distributed.',
+        content: 'Read about the real-world impact of our community through blog posts, news updates, and testimonials from families we\'ve helped.',
         placement: 'bottom',
         route: null
     },
@@ -142,8 +142,8 @@ const ALL_STEPS = [
         category: 'community',
         target: null,
         icon: 'fa-calendar-alt',
-        title: 'Distribution Events',
-        content: 'Check the home page for upcoming food distribution events at local schools and community centers. No account needed to attend!',
+        title: 'Community Hubs',
+        content: 'Visit your community page to find food access programs, connect with neighbors, and learn about local resources. Each community has its own hub.',
         placement: 'center',
         route: null
     },
@@ -155,7 +155,7 @@ const ALL_STEPS = [
         target: null,
         icon: 'fa-tachometer-alt',
         title: 'Your Dashboard',
-        content: 'Your dashboard shows your active claims, donation history, and personal impact stats. It\'s your home base on DoGoods.',
+        content: 'Your dashboard shows your food claim receipts, recent activity, and quick actions like finding food or setting up donation schedules.',
         placement: 'center',
         route: '/dashboard',
         requiresAuth: true
