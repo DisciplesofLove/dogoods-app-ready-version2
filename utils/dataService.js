@@ -594,6 +594,7 @@ class DataService {
         donor_occupation: listingData.donor_occupation || null,
         donor_type: listingData.donor_type || null,
         community_id: communityId,
+        listing_type: listingData.listing_type || 'donation',
         latitude: listingData.latitude || null,
         longitude: listingData.longitude || null,
         dietary_tags: listingData.dietary_tags || [],
