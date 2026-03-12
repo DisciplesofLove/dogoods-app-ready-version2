@@ -1,13 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import AdminLayout from './AdminLayout';
 import Button from '../../components/common/Button';
-import Input from '../../components/common/Input';
 import supabase from '../../utils/supabaseClient';
 import { useAuthContext } from '../../utils/AuthContext';
-import { toast } from 'react-toastify';
 
 const CATEGORIES = [
-    { value: '', label: 'Select category' },
+    { value: '', label: 'Select Category' },
     { value: 'produce', label: 'Fresh Produce' },
     { value: 'dairy', label: 'Dairy' },
     { value: 'bakery', label: 'Bakery' },
@@ -20,34 +18,14 @@ const CATEGORIES = [
     { value: 'prepared', label: 'Prepared Foods' }
 ];
 
-const UNITS = [
-    { value: 'lb', label: 'Pounds (lb)' },
-    { value: 'oz', label: 'Ounces (oz)' },
-    { value: 'kg', label: 'Kilograms (kg)' },
-    { value: 'g', label: 'Grams (g)' },
-    { value: 'count', label: 'Count/Items' },
-    { value: 'serving', label: 'Servings' }
+const STATUSES = [
+    { value: 'active', label: 'Active' },
+    { value: 'pending', label: 'Pending' },
+    { value: 'claimed', label: 'Claimed' },
+    { value: 'expired', label: 'Expired' }
 ];
 
-const INITIAL_FORM = {
-    title: '',
-    description: '',
-    quantity: '',
-    unit: 'lb',
-    category: '',
-    expiry_date: '',
-    pickup_by: '',
-    community_id: '',
-    donor_name: 'DoGoods Admin',
-    donor_type: 'organization',
-    status: 'active',
-    dietary_tags: [],
-    allergens: [],
-    ingredients: '',
-    image: null,
-};
-
-// Helper: REST call that bypasses Supabase JS client auth
+// REST helper: bypasses Supabase JS client auth to avoid hanging
 async function supabaseRest(path, method, body = null, extraHeaders = {}) {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -87,624 +65,606 @@ async function supabaseRest(path, method, body = null, extraHeaders = {}) {
     return null;
 }
 
-export default function AdminShareFood() {
-    const { user } = useAuthContext();
-    const [communities, setCommunities] = useState([]);
-    const [listings, setListings] = useState([]);
-    const [loadingCommunities, setLoadingCommunities] = useState(true);
-    const [loadingListings, setLoadingListings] = useState(false);
-    const [submitting, setSubmitting] = useState(false);
-    const [formData, setFormData] = useState({ ...INITIAL_FORM });
-    const [errors, setErrors] = useState({});
-    const [imagePreview, setImagePreview] = useState(null);
-    const [filterCommunity, setFilterCommunity] = useState('');
-    const [editingId, setEditingId] = useState(null);
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
-    const [activeTab, setActiveTab] = useState('create'); // 'create' | 'manage'
+// Uncontrolled input to avoid re-renders (same pattern as ImpactDataEntry)
+const UncontrolledCell = ({ defaultValue, onBlur, type = 'text', inputRef, className, placeholder }) => (
+    <input
+        ref={inputRef}
+        type={type}
+        defaultValue={defaultValue}
+        placeholder={placeholder}
+        onBlur={(e) => {
+            const value = type === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value;
+            onBlur(value);
+        }}
+        className={className || "w-full min-w-[150px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"}
+    />
+);
 
-    // Fetch communities
-    useEffect(() => {
-        const fetchCommunities = async () => {
-            try {
-                const { data, error } = await supabase
-                    .from('communities')
-                    .select('id, name')
-                    .eq('is_active', true)
-                    .order('name');
-                if (error) throw error;
-                setCommunities(data || []);
-            } catch (err) {
-                console.error('Error fetching communities:', err);
-                toast.error('Failed to load communities');
-            } finally {
-                setLoadingCommunities(false);
-            }
-        };
+function AdminShareFood() {
+    const { user } = useAuthContext();
+    const [data, setData] = React.useState([]);
+    const [loading, setLoading] = React.useState(true);
+    const [refreshing, setRefreshing] = React.useState(false);
+    const [communities, setCommunities] = React.useState([]);
+    const [filterCommunity, setFilterCommunity] = React.useState('');
+    const [filterStatus, setFilterStatus] = React.useState('all');
+    const [dateFilter, setDateFilter] = React.useState('all');
+
+    // Refs for new row inputs (uncontrolled)
+    const newRowRefs = React.useRef({
+        title: null,
+        community_id: null,
+        category: null,
+        quantity: null,
+        unit: null,
+        description: null,
+        expiry_date: null,
+        donor_name: null,
+    });
+
+    React.useEffect(() => {
         fetchCommunities();
+        fetchData();
     }, []);
 
-    // Fetch listings
-    const fetchListings = useCallback(async () => {
-        setLoadingListings(true);
+    const fetchCommunities = async () => {
         try {
-            let filter = 'select=*,users:user_id(id,name)&order=created_at.desc&limit=100';
-            if (filterCommunity) {
-                filter += `&community_id=eq.${filterCommunity}`;
-            }
-            const data = await supabaseRest(`food_listings?${filter}`, 'GET', null, { 'Prefer': '' });
-            setListings(data || []);
+            const { data, error } = await supabase
+                .from('communities')
+                .select('id, name')
+                .eq('is_active', true)
+                .order('name');
+            if (error) throw error;
+            setCommunities(data || []);
         } catch (err) {
-            console.error('Error fetching listings:', err);
-            toast.error('Failed to load listings');
-        } finally {
-            setLoadingListings(false);
+            console.error('Error fetching communities:', err);
+            setCommunities([]);
         }
-    }, [filterCommunity]);
-
-    useEffect(() => {
-        fetchListings();
-    }, [fetchListings]);
-
-    // Form handlers
-    const handleChange = (e) => {
-        const { name, value, type, checked } = e.target;
-        if (type === 'checkbox' && (name === 'dietary_tags' || name === 'allergens')) {
-            setFormData(prev => ({
-                ...prev,
-                [name]: checked
-                    ? [...prev[name], value]
-                    : prev[name].filter(item => item !== value)
-            }));
-        } else if (type === 'number') {
-            const numValue = value === '' ? '' : Number(value);
-            if (numValue < 0) return;
-            setFormData(prev => ({ ...prev, [name]: numValue }));
-        } else {
-            setFormData(prev => ({ ...prev, [name]: value }));
-        }
-        if (errors[name]) setErrors(prev => ({ ...prev, [name]: null }));
     };
 
-    const handleImageChange = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const maxSize = 5 * 1024 * 1024;
-        if (file.size > maxSize) {
-            setErrors(prev => ({ ...prev, image: 'Image must be less than 5MB' }));
-            return;
-        }
-        if (imagePreview) URL.revokeObjectURL(imagePreview);
-        setImagePreview(URL.createObjectURL(file));
-        setFormData(prev => ({ ...prev, image: file }));
-        setErrors(prev => ({ ...prev, image: null }));
-    };
-
-    const validate = () => {
-        const errs = {};
-        if (!formData.title.trim()) errs.title = 'Title is required';
-        if (!formData.quantity) errs.quantity = 'Quantity is required';
-        if (!formData.category) errs.category = 'Category is required';
-        if (!formData.community_id) errs.community_id = 'Community is required';
-        if (!formData.description.trim()) errs.description = 'Description is required';
-        if (formData.category !== 'produce' && !formData.expiry_date) errs.expiry_date = 'Expiry date is required for non-produce';
-        setErrors(errs);
-        return Object.keys(errs).length === 0;
-    };
-
-    const uploadImage = async (file) => {
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-        const { error } = await supabase.storage.from('food-images').upload(fileName, file);
-        if (error) throw error;
-        const { data } = supabase.storage.from('food-images').getPublicUrl(fileName);
-        return data?.publicUrl || null;
-    };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!validate()) return;
-        setSubmitting(true);
+    const fetchData = async (isRefresh = false) => {
         try {
-            // Upload image if provided
-            let imageUrl = formData.image_url || null;
-            if (formData.image instanceof File) {
-                imageUrl = await uploadImage(formData.image);
-            }
-
-            const community = communities.find(c => String(c.id) === String(formData.community_id));
-
-            const listing = {
-                title: formData.title,
-                description: formData.description,
-                quantity: formData.quantity,
-                unit: formData.unit,
-                category: formData.category,
-                expiry_date: formData.expiry_date || null,
-                pickup_by: formData.pickup_by || null,
-                status: 'active',
-                listing_type: 'donation',
-                user_id: user?.id || null,
-                image_url: imageUrl,
-                donor_name: formData.donor_name || 'DoGoods Admin',
-                donor_type: formData.donor_type || 'organization',
-                community_id: formData.community_id || null,
-                dietary_tags: formData.dietary_tags || [],
-                allergens: formData.allergens || [],
-                ingredients: formData.ingredients || null,
-            };
-
-            if (editingId) {
-                await supabaseRest(
-                    `food_listings?id=eq.${editingId}`,
-                    'PATCH',
-                    listing,
-                    { 'Prefer': 'return=minimal' }
-                );
-                toast.success(`Listing updated for ${community?.name || 'community'}`);
+            if (isRefresh) {
+                setRefreshing(true);
             } else {
-                await supabaseRest(
-                    'food_listings',
-                    'POST',
-                    listing,
-                    { 'Prefer': 'return=minimal' }
-                );
-                toast.success(`Food shared to ${community?.name || 'community'}!`);
+                setLoading(true);
             }
 
-            // Reset
-            setFormData({ ...INITIAL_FORM });
-            setImagePreview(null);
-            setEditingId(null);
-            setErrors({});
-            fetchListings();
-        } catch (err) {
-            console.error('Submit error:', err);
-            toast.error(err.message || 'Failed to save listing');
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            const { data: listings, error } = await supabase
+                .from('food_listings')
+                .select('*, users:user_id(id, name)')
+                .order('created_at', { ascending: false })
+                .abortSignal(controller.signal);
+
+            clearTimeout(timeoutId);
+
+            if (error) throw error;
+            setData(listings || []);
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.error('Fetch timed out after 15 seconds');
+            } else {
+                console.error('Error fetching food listings:', error);
+            }
+            if (!isRefresh) setData([]);
         } finally {
-            setSubmitting(false);
+            setLoading(false);
+            setRefreshing(false);
         }
     };
 
-    const handleEdit = (listing) => {
-        setFormData({
-            title: listing.title || '',
-            description: listing.description || '',
-            quantity: listing.quantity || '',
-            unit: listing.unit || 'lb',
-            category: listing.category || '',
-            expiry_date: listing.expiry_date || '',
-            pickup_by: listing.pickup_by || '',
-            community_id: listing.community_id || '',
-            donor_name: listing.donor_name || 'DoGoods Admin',
-            donor_type: listing.donor_type || 'organization',
-            status: listing.status || 'active',
-            dietary_tags: listing.dietary_tags || [],
-            allergens: listing.allergens || [],
-            ingredients: listing.ingredients || '',
-            image: null,
-            image_url: listing.image_url || null,
-        });
-        setEditingId(listing.id);
-        setImagePreview(listing.image_url || null);
-        setActiveTab('create');
-        window.scrollTo(0, 0);
-    };
+    // Filter data
+    const filteredData = React.useMemo(() => {
+        let filtered = data;
 
-    const handleDelete = async (id) => {
-        try {
-            await supabaseRest(`food_listings?id=eq.${id}`, 'DELETE', null, { 'Prefer': 'return=minimal' });
-            toast.success('Listing deleted');
-            setShowDeleteConfirm(null);
-            fetchListings();
-        } catch (err) {
-            console.error('Delete error:', err);
-            toast.error('Failed to delete listing');
+        if (filterCommunity) {
+            filtered = filtered.filter(row => String(row.community_id) === String(filterCommunity));
         }
-    };
-
-    const handleStatusToggle = async (listing) => {
-        const newStatus = listing.status === 'active' ? 'inactive' : 'active';
-        try {
-            await supabaseRest(
-                `food_listings?id=eq.${listing.id}`,
-                'PATCH',
-                { status: newStatus },
-                { 'Prefer': 'return=minimal' }
-            );
-            toast.success(`Listing ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
-            fetchListings();
-        } catch (err) {
-            toast.error('Failed to update status');
+        if (filterStatus !== 'all') {
+            filtered = filtered.filter(row => row.status === filterStatus);
         }
-    };
+        if (dateFilter !== 'all') {
+            const now = new Date();
+            filtered = filtered.filter(row => {
+                const rowDate = new Date(row.created_at);
+                switch (dateFilter) {
+                    case 'current-week': {
+                        const startOfWeek = new Date(now);
+                        startOfWeek.setDate(now.getDate() - now.getDay());
+                        startOfWeek.setHours(0, 0, 0, 0);
+                        return rowDate >= startOfWeek;
+                    }
+                    case 'current-month':
+                        return rowDate.getFullYear() === now.getFullYear() && rowDate.getMonth() === now.getMonth();
+                    default:
+                        return true;
+                }
+            });
+        }
+        return filtered;
+    }, [data, filterCommunity, filterStatus, dateFilter]);
 
     const communityName = (id) => {
         const c = communities.find(c => String(c.id) === String(id));
-        return c?.name || 'Unknown';
+        return c?.name || '';
+    };
+
+    // Add new row
+    const handleAddRow = async () => {
+        try {
+            const title = newRowRefs.current.title?.value?.trim();
+            const communityId = newRowRefs.current.community_id?.value;
+            const category = newRowRefs.current.category?.value;
+            const quantity = parseFloat(newRowRefs.current.quantity?.value) || 0;
+            const unit = newRowRefs.current.unit?.value || 'lb';
+            const description = newRowRefs.current.description?.value?.trim() || '';
+            const expiryDate = newRowRefs.current.expiry_date?.value || null;
+            const donorName = newRowRefs.current.donor_name?.value?.trim() || 'DoGoods Admin';
+
+            if (!title) { alert('⚠️ Title is required.'); return; }
+            if (!communityId) { alert('⚠️ Please select a community.'); return; }
+            if (!category) { alert('⚠️ Please select a category.'); return; }
+            if (!quantity) { alert('⚠️ Quantity is required.'); return; }
+
+            const newListing = {
+                title,
+                description,
+                category,
+                quantity,
+                unit,
+                community_id: communityId,
+                expiry_date: expiryDate,
+                donor_name: donorName,
+                donor_type: 'organization',
+                listing_type: 'donation',
+                status: 'active',
+                user_id: user?.id || null,
+            };
+
+            await supabaseRest('food_listings', 'POST', newListing, { 'Prefer': 'return=minimal' });
+
+            // Reset inputs
+            if (newRowRefs.current.title) newRowRefs.current.title.value = '';
+            if (newRowRefs.current.community_id) newRowRefs.current.community_id.value = '';
+            if (newRowRefs.current.category) newRowRefs.current.category.value = '';
+            if (newRowRefs.current.quantity) newRowRefs.current.quantity.value = '';
+            if (newRowRefs.current.unit) newRowRefs.current.unit.value = 'lb';
+            if (newRowRefs.current.description) newRowRefs.current.description.value = '';
+            if (newRowRefs.current.expiry_date) newRowRefs.current.expiry_date.value = '';
+            if (newRowRefs.current.donor_name) newRowRefs.current.donor_name.value = '';
+
+            await fetchData(true);
+            alert('✅ Food listing added!');
+        } catch (error) {
+            console.error('Error adding food listing:', error);
+            const msg = error.message || error.toString();
+            if (msg.includes('Failed to fetch')) {
+                alert('❌ Network error: Cannot connect to database.');
+            } else if (msg.includes('JWT')) {
+                alert('❌ Authentication error: Please log out and log back in.');
+            } else {
+                alert('❌ Failed to add food listing: ' + msg);
+            }
+        }
+    };
+
+    // Update a single field inline
+    const handleUpdateRow = async (id, field, value) => {
+        try {
+            await supabaseRest(
+                `food_listings?id=eq.${id}`,
+                'PATCH',
+                { [field]: value, updated_at: new Date().toISOString() },
+                { 'Prefer': 'return=minimal' }
+            );
+            // Update local
+            setData(prev => prev.map(row =>
+                row.id === id ? { ...row, [field]: value } : row
+            ));
+        } catch (error) {
+            console.error('Error updating row:', error);
+            alert('Failed to update: ' + error.message);
+        }
+    };
+
+    // Delete row
+    const handleDeleteRow = async (id) => {
+        if (!confirm('Are you sure you want to delete this food listing?')) return;
+        try {
+            await supabaseRest(`food_listings?id=eq.${id}`, 'DELETE', null, { 'Prefer': 'return=minimal' });
+            await fetchData(true);
+            alert('Food listing deleted!');
+        } catch (error) {
+            console.error('Error deleting row:', error);
+            alert('Failed to delete: ' + error.message);
+        }
+    };
+
+    // Export CSV
+    const exportToCSV = () => {
+        const headers = ['Created', 'Title', 'Community', 'Category', 'Quantity', 'Unit', 'Status', 'Expiry Date', 'Donor', 'Description'];
+        const rows = filteredData.map(row => [
+            row.created_at ? new Date(row.created_at).toLocaleDateString() : '',
+            row.title || '',
+            communityName(row.community_id),
+            row.category || '',
+            row.quantity || 0,
+            row.unit || '',
+            row.status || '',
+            row.expiry_date || '',
+            row.donor_name || '',
+            (row.description || '').replace(/"/g, '""')
+        ]);
+
+        const csvContent = [headers, ...rows]
+            .map(r => r.map(cell => `"${cell}"`).join(','))
+            .join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `food_listings_${new Date().toISOString().split('T')[0]}.csv`;
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     };
 
     return (
         <AdminLayout active="share-food">
-            <div className="space-y-6">
+            <div className="p-6">
                 {/* Header */}
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Share Food to Communities</h1>
-                    <p className="text-gray-600 mt-1">Create and manage food listings for any community</p>
+                <div className="mb-6 flex justify-between items-center">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900">Share Food to Communities</h1>
+                        <p className="mt-2 text-gray-600">Add and manage food listings for any community — spreadsheet style</p>
+                    </div>
+                    <div className="flex space-x-3">
+                        <Button
+                            variant="secondary"
+                            onClick={() => fetchData(true)}
+                            disabled={refreshing}
+                        >
+                            <i className={`fas fa-sync-alt mr-2 ${refreshing ? 'animate-spin' : ''}`}></i>
+                            {refreshing ? 'Refreshing...' : 'Refresh'}
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={exportToCSV}
+                        >
+                            <i className="fas fa-download mr-2"></i>
+                            Export CSV
+                        </Button>
+                    </div>
                 </div>
 
-                {/* Tabs */}
-                <div className="border-b border-gray-200">
-                    <nav className="flex space-x-8">
-                        <button
-                            onClick={() => { setActiveTab('create'); setEditingId(null); setFormData({ ...INITIAL_FORM }); setImagePreview(null); }}
-                            className={`py-3 px-1 border-b-2 font-medium text-sm ${
-                                activeTab === 'create'
-                                    ? 'border-[#2CABE3] text-[#2CABE3]'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                            }`}
-                        >
-                            <i className="fas fa-plus mr-2"></i>
-                            {editingId ? 'Edit Listing' : 'Create Listing'}
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('manage')}
-                            className={`py-3 px-1 border-b-2 font-medium text-sm ${
-                                activeTab === 'manage'
-                                    ? 'border-[#2CABE3] text-[#2CABE3]'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                            }`}
-                        >
-                            <i className="fas fa-list mr-2"></i>
-                            Manage Listings ({listings.length})
-                        </button>
-                    </nav>
-                </div>
-
-                {/* Create / Edit Tab */}
-                {activeTab === 'create' && (
-                    <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 space-y-6">
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                            <div className="flex items-start">
-                                <i className="fas fa-info-circle text-blue-500 mt-0.5 mr-3"></i>
-                                <div>
-                                    <h3 className="text-sm font-medium text-blue-800">Admin Food Sharing</h3>
-                                    <p className="text-sm text-blue-700 mt-1">
-                                        Listings created here are immediately active and visible to community members. Select a community to share food with.
-                                    </p>
-                                </div>
-                            </div>
+                {/* Filters */}
+                <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between flex-wrap gap-4">
+                        <div className="flex items-center gap-2">
+                            <i className="fas fa-filter text-blue-600"></i>
+                            <span className="font-medium text-gray-700">Filters:</span>
                         </div>
-
-                        {/* Community Selection */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Community <span className="text-red-500">*</span>
-                            </label>
-                            {loadingCommunities ? (
-                                <div className="animate-pulse h-10 bg-gray-200 rounded"></div>
-                            ) : (
-                                <select
-                                    name="community_id"
-                                    value={formData.community_id}
-                                    onChange={handleChange}
-                                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent ${
-                                        errors.community_id ? 'border-red-500' : 'border-gray-300'
-                                    }`}
-                                >
-                                    <option value="">Select a community</option>
-                                    {communities.map(c => (
-                                        <option key={c.id} value={c.id}>{c.name}</option>
-                                    ))}
-                                </select>
-                            )}
-                            {errors.community_id && <p className="mt-1 text-sm text-red-500">{errors.community_id}</p>}
-                        </div>
-
-                        {/* Food Details */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <Input
-                                label="Food Title"
-                                name="title"
-                                value={formData.title}
-                                onChange={handleChange}
-                                error={errors.title}
-                                required
-                                maxLength={100}
-                                placeholder="e.g., Fresh Organic Apples"
-                            />
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Category <span className="text-red-500">*</span>
-                                </label>
-                                <select
-                                    name="category"
-                                    value={formData.category}
-                                    onChange={handleChange}
-                                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent ${
-                                        errors.category ? 'border-red-500' : 'border-gray-300'
-                                    }`}
-                                >
-                                    {CATEGORIES.map(c => (
-                                        <option key={c.value} value={c.value}>{c.label}</option>
-                                    ))}
-                                </select>
-                                {errors.category && <p className="mt-1 text-sm text-red-500">{errors.category}</p>}
-                            </div>
-
-                            <div className="md:col-span-2">
-                                <Input
-                                    label="Description"
-                                    name="description"
-                                    type="textarea"
-                                    value={formData.description}
-                                    onChange={handleChange}
-                                    error={errors.description}
-                                    required
-                                    maxLength={500}
-                                    placeholder="Describe the food, condition, and any pickup details"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Quantity <span className="text-red-500">*</span>
-                                </label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="number"
-                                        name="quantity"
-                                        value={formData.quantity}
-                                        onChange={handleChange}
-                                        min="0"
-                                        step="0.01"
-                                        className={`flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent ${
-                                            errors.quantity ? 'border-red-500' : 'border-gray-300'
-                                        }`}
-                                        placeholder="Amount"
-                                    />
-                                    <select
-                                        name="unit"
-                                        value={formData.unit}
-                                        onChange={handleChange}
-                                        className="w-36 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
-                                    >
-                                        {UNITS.map(u => (
-                                            <option key={u.value} value={u.value}>{u.label}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                {errors.quantity && <p className="mt-1 text-sm text-red-500">{errors.quantity}</p>}
-                            </div>
-
-                            {formData.category !== 'produce' && (
-                                <Input
-                                    label="Expiration Date"
-                                    name="expiry_date"
-                                    type="date"
-                                    value={formData.expiry_date}
-                                    onChange={handleChange}
-                                    error={errors.expiry_date}
-                                    min={new Date().toISOString().split('T')[0]}
-                                />
-                            )}
-
-                            <Input
-                                label="Pickup Deadline (Optional)"
-                                name="pickup_by"
-                                type="datetime-local"
-                                value={formData.pickup_by}
-                                onChange={handleChange}
-                                min={new Date().toISOString().slice(0, 16)}
-                            />
-
-                            <Input
-                                label="Donor Name"
-                                name="donor_name"
-                                value={formData.donor_name}
-                                onChange={handleChange}
-                                maxLength={100}
-                                placeholder="DoGoods Admin"
-                            />
-                        </div>
-
-                        {/* Dietary Tags */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Dietary Information (Optional)</label>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="flex gap-3 flex-wrap items-center">
+                            <select
+                                value={filterCommunity}
+                                onChange={(e) => setFilterCommunity(e.target.value)}
+                                className="px-3 py-2 rounded-md text-sm border border-gray-300 focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                            >
+                                <option value="">All Communities</option>
+                                {communities.map(c => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
+                            <select
+                                value={filterStatus}
+                                onChange={(e) => setFilterStatus(e.target.value)}
+                                className="px-3 py-2 rounded-md text-sm border border-gray-300 focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                            >
+                                <option value="all">All Statuses</option>
+                                {STATUSES.map(s => (
+                                    <option key={s.value} value={s.value}>{s.label}</option>
+                                ))}
+                            </select>
+                            <div className="flex gap-1">
                                 {[
-                                    { value: 'vegetarian', label: 'Vegetarian', icon: '🥬' },
-                                    { value: 'vegan', label: 'Vegan', icon: '🌱' },
-                                    { value: 'gluten-free', label: 'Gluten-Free', icon: '🌾' },
-                                    { value: 'dairy-free', label: 'Dairy-Free', icon: '🥛' },
-                                    { value: 'nut-free', label: 'Nut-Free', icon: '🥜' },
-                                    { value: 'halal', label: 'Halal', icon: '☪️' },
-                                    { value: 'kosher', label: 'Kosher', icon: '✡️' },
-                                    { value: 'organic', label: 'Organic', icon: '♻️' }
-                                ].map(tag => (
-                                    <label key={tag.value} className="flex items-center space-x-2 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            name="dietary_tags"
-                                            value={tag.value}
-                                            checked={formData.dietary_tags.includes(tag.value)}
-                                            onChange={handleChange}
-                                            className="w-4 h-4 text-[#2CABE3] border-gray-300 rounded focus:ring-[#2CABE3]"
+                                    { value: 'current-week', label: 'This Week' },
+                                    { value: 'current-month', label: 'This Month' },
+                                    { value: 'all', label: 'All' }
+                                ].map(df => (
+                                    <button
+                                        key={df.value}
+                                        onClick={() => setDateFilter(df.value)}
+                                        className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                                            dateFilter === df.value
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-white text-gray-700 hover:bg-blue-100'
+                                        }`}
+                                    >
+                                        {df.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="text-sm text-gray-600">
+                            Showing <span className="font-semibold text-blue-700">{filteredData.length}</span> of <span className="font-semibold">{data.length}</span> total listings
+                        </div>
+                    </div>
+                </div>
+
+                {/* Table */}
+                {loading ? (
+                    <div className="p-8 text-center">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2CABE3] mx-auto"></div>
+                        <p className="mt-4 text-gray-600">Loading food listings...</p>
+                    </div>
+                ) : (
+                    <div className="bg-white rounded-lg shadow overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50 sticky top-0">
+                                <tr>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
+                                        Title
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
+                                        Community
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[140px]">
+                                        Category
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[80px]">
+                                        Qty
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[80px]">
+                                        Unit
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[250px]">
+                                        Description
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[140px]">
+                                        Expiry Date
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
+                                        Donor
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+                                        Status
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+                                        Actions
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {/* New row (highlighted) */}
+                                <tr className="bg-[#2CABE3]/10">
+                                    <td className="px-3 py-2">
+                                        <UncontrolledCell
+                                            defaultValue=""
+                                            inputRef={el => newRowRefs.current.title = el}
+                                            onBlur={() => {}}
+                                            placeholder="Food title"
                                         />
-                                        <span className="text-sm text-gray-700">{tag.icon} {tag.label}</span>
-                                    </label>
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <select
+                                            ref={el => newRowRefs.current.community_id = el}
+                                            className="w-full min-w-[150px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                        >
+                                            <option value="">Select Community</option>
+                                            {communities.map(c => (
+                                                <option key={c.id} value={c.id}>{c.name}</option>
+                                            ))}
+                                        </select>
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <select
+                                            ref={el => newRowRefs.current.category = el}
+                                            className="w-full min-w-[120px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                        >
+                                            {CATEGORIES.map(c => (
+                                                <option key={c.value} value={c.value}>{c.label}</option>
+                                            ))}
+                                        </select>
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <UncontrolledCell
+                                            type="number"
+                                            defaultValue=""
+                                            inputRef={el => newRowRefs.current.quantity = el}
+                                            onBlur={() => {}}
+                                            placeholder="0"
+                                            className="w-full min-w-[60px] px-2 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                        />
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <select
+                                            ref={el => newRowRefs.current.unit = el}
+                                            defaultValue="lb"
+                                            className="w-full min-w-[60px] px-2 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                        >
+                                            <option value="lb">lb</option>
+                                            <option value="oz">oz</option>
+                                            <option value="kg">kg</option>
+                                            <option value="g">g</option>
+                                            <option value="count">count</option>
+                                            <option value="serving">serving</option>
+                                        </select>
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <UncontrolledCell
+                                            defaultValue=""
+                                            inputRef={el => newRowRefs.current.description = el}
+                                            onBlur={() => {}}
+                                            placeholder="Description"
+                                        />
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <UncontrolledCell
+                                            type="date"
+                                            defaultValue=""
+                                            inputRef={el => newRowRefs.current.expiry_date = el}
+                                            onBlur={() => {}}
+                                        />
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <UncontrolledCell
+                                            defaultValue=""
+                                            inputRef={el => newRowRefs.current.donor_name = el}
+                                            onBlur={() => {}}
+                                            placeholder="DoGoods Admin"
+                                        />
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <span className="text-sm text-emerald-700 font-medium">Active</span>
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            onClick={handleAddRow}
+                                        >
+                                            <i className="fas fa-plus"></i>
+                                        </Button>
+                                    </td>
+                                </tr>
+
+                                {/* Existing rows */}
+                                {filteredData.map((row) => (
+                                    <tr key={row.id} className="hover:bg-gray-50">
+                                        <td className="px-3 py-2">
+                                            <UncontrolledCell
+                                                defaultValue={row.title || ''}
+                                                onBlur={(val) => handleUpdateRow(row.id, 'title', val)}
+                                            />
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <select
+                                                value={row.community_id || ''}
+                                                onChange={(e) => handleUpdateRow(row.id, 'community_id', e.target.value)}
+                                                className="w-full min-w-[150px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                            >
+                                                <option value="">No Community</option>
+                                                {communities.map(c => (
+                                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                                ))}
+                                            </select>
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <select
+                                                value={row.category || ''}
+                                                onChange={(e) => handleUpdateRow(row.id, 'category', e.target.value)}
+                                                className="w-full min-w-[120px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                            >
+                                                {CATEGORIES.map(c => (
+                                                    <option key={c.value} value={c.value}>{c.label}</option>
+                                                ))}
+                                            </select>
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <UncontrolledCell
+                                                type="number"
+                                                defaultValue={row.quantity || 0}
+                                                onBlur={(val) => handleUpdateRow(row.id, 'quantity', val)}
+                                                className="w-full min-w-[60px] px-2 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                            />
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <select
+                                                value={row.unit || 'lb'}
+                                                onChange={(e) => handleUpdateRow(row.id, 'unit', e.target.value)}
+                                                className="w-full min-w-[60px] px-2 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                            >
+                                                <option value="lb">lb</option>
+                                                <option value="oz">oz</option>
+                                                <option value="kg">kg</option>
+                                                <option value="g">g</option>
+                                                <option value="count">count</option>
+                                                <option value="serving">serving</option>
+                                            </select>
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <UncontrolledCell
+                                                defaultValue={row.description || ''}
+                                                onBlur={(val) => handleUpdateRow(row.id, 'description', val)}
+                                            />
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <UncontrolledCell
+                                                type="date"
+                                                defaultValue={row.expiry_date || ''}
+                                                onBlur={(val) => handleUpdateRow(row.id, 'expiry_date', val || null)}
+                                            />
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <UncontrolledCell
+                                                defaultValue={row.donor_name || ''}
+                                                onBlur={(val) => handleUpdateRow(row.id, 'donor_name', val)}
+                                            />
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <select
+                                                value={row.status || 'active'}
+                                                onChange={(e) => handleUpdateRow(row.id, 'status', e.target.value)}
+                                                className={`w-full min-w-[80px] px-2 py-3 text-sm font-medium border rounded focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent ${
+                                                    row.status === 'active' ? 'border-emerald-300 text-emerald-700 bg-emerald-50' :
+                                                    row.status === 'pending' ? 'border-yellow-300 text-yellow-700 bg-yellow-50' :
+                                                    row.status === 'claimed' ? 'border-blue-300 text-blue-700 bg-blue-50' :
+                                                    'border-gray-300 text-gray-700 bg-gray-50'
+                                                }`}
+                                            >
+                                                {STATUSES.map(s => (
+                                                    <option key={s.value} value={s.value}>{s.label}</option>
+                                                ))}
+                                            </select>
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <Button
+                                                variant="danger"
+                                                size="sm"
+                                                onClick={() => handleDeleteRow(row.id)}
+                                            >
+                                                <i className="fas fa-trash"></i>
+                                            </Button>
+                                        </td>
+                                    </tr>
                                 ))}
-                            </div>
-                        </div>
 
-                        {/* Image */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Photo (Optional for admin)</label>
-                            <input
-                                type="file"
-                                accept="image/jpeg,image/png,image/gif"
-                                onChange={handleImageChange}
-                                className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-[#2CABE3]/10 file:text-[#2CABE3] hover:file:bg-[#2CABE3]/20"
-                            />
-                            {errors.image && <p className="mt-1 text-sm text-red-500">{errors.image}</p>}
-                            {imagePreview && (
-                                <img src={imagePreview} alt="Preview" className="mt-2 h-32 w-32 object-cover rounded-lg border" />
-                            )}
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex justify-end space-x-3 pt-4 border-t">
-                            {editingId && (
-                                <Button
-                                    type="button"
-                                    variant="secondary"
-                                    onClick={() => { setEditingId(null); setFormData({ ...INITIAL_FORM }); setImagePreview(null); setErrors({}); }}
-                                >
-                                    Cancel Edit
-                                </Button>
-                            )}
-                            <Button type="submit" disabled={submitting}>
-                                {submitting ? (
-                                    <span className="flex items-center">
-                                        <i className="fas fa-spinner fa-spin mr-2"></i>
-                                        {editingId ? 'Updating...' : 'Sharing...'}
-                                    </span>
-                                ) : (
-                                    <span>
-                                        <i className={`fas ${editingId ? 'fa-save' : 'fa-share-alt'} mr-2`}></i>
-                                        {editingId ? 'Update Listing' : 'Share Food'}
-                                    </span>
+                                {filteredData.length === 0 && (
+                                    <tr>
+                                        <td colSpan="10" className="px-6 py-8 text-center text-gray-500">
+                                            No food listings yet. Add your first listing using the row above.
+                                        </td>
+                                    </tr>
                                 )}
-                            </Button>
-                        </div>
-                    </form>
-                )}
-
-                {/* Manage Tab */}
-                {activeTab === 'manage' && (
-                    <div className="space-y-4">
-                        {/* Filter by community */}
-                        <div className="bg-white rounded-lg shadow p-4">
-                            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                                <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Filter by Community:</label>
-                                <select
-                                    value={filterCommunity}
-                                    onChange={(e) => setFilterCommunity(e.target.value)}
-                                    className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
-                                >
-                                    <option value="">All Communities</option>
-                                    {communities.map(c => (
-                                        <option key={c.id} value={c.id}>{c.name}</option>
-                                    ))}
-                                </select>
-                                <span className="text-sm text-gray-500">{listings.length} listing{listings.length !== 1 ? 's' : ''}</span>
-                            </div>
-                        </div>
-
-                        {loadingListings ? (
-                            <div className="flex justify-center py-12">
-                                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#2CABE3]"></div>
-                            </div>
-                        ) : listings.length === 0 ? (
-                            <div className="bg-white rounded-lg shadow p-12 text-center">
-                                <i className="fas fa-box-open text-gray-400 text-4xl mb-4"></i>
-                                <p className="text-gray-600">No food listings found</p>
-                                <Button className="mt-4" onClick={() => setActiveTab('create')}>
-                                    <i className="fas fa-plus mr-2"></i>Create One
-                                </Button>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {listings.map(listing => (
-                                    <div key={listing.id} className="bg-white rounded-lg shadow overflow-hidden relative">
-                                        {listing.image_url && (
-                                            <img src={listing.image_url} alt={listing.title} className="w-full h-40 object-cover" />
-                                        )}
-                                        {!listing.image_url && (
-                                            <div className="w-full h-40 bg-gray-100 flex items-center justify-center">
-                                                <i className="fas fa-image text-gray-300 text-4xl"></i>
-                                            </div>
-                                        )}
-                                        <div className="p-4">
-                                            <div className="flex justify-between items-start mb-1">
-                                                <h3 className="font-semibold text-gray-900 truncate flex-1">{listing.title}</h3>
-                                                <span className={`ml-2 px-2 py-0.5 text-xs rounded-full whitespace-nowrap ${
-                                                    listing.status === 'active'
-                                                        ? 'bg-emerald-100 text-emerald-800'
-                                                        : listing.status === 'pending'
-                                                        ? 'bg-yellow-100 text-yellow-800'
-                                                        : 'bg-gray-100 text-gray-800'
-                                                }`}>
-                                                    {listing.status}
-                                                </span>
-                                            </div>
-                                            <p className="text-xs text-[#2CABE3] font-medium mb-2">
-                                                <i className="fas fa-users mr-1"></i>
-                                                {listing.community_id ? communityName(listing.community_id) : 'No community'}
-                                            </p>
-                                            <p className="text-sm text-gray-600 line-clamp-2 mb-3">{listing.description}</p>
-                                            <div className="flex items-center text-xs text-gray-500 mb-3">
-                                                <span className="mr-3"><i className="fas fa-weight-hanging mr-1"></i>{listing.quantity} {listing.unit}</span>
-                                                <span className="capitalize"><i className="fas fa-tag mr-1"></i>{listing.category}</span>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => handleEdit(listing)}
-                                                    className="flex-1 px-3 py-1.5 text-xs font-medium text-[#2CABE3] border border-[#2CABE3] rounded-lg hover:bg-[#2CABE3]/10 transition"
-                                                >
-                                                    <i className="fas fa-edit mr-1"></i>Edit
-                                                </button>
-                                                <button
-                                                    onClick={() => handleStatusToggle(listing)}
-                                                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                                                        listing.status === 'active'
-                                                            ? 'text-yellow-700 border border-yellow-400 hover:bg-yellow-50'
-                                                            : 'text-emerald-700 border border-emerald-400 hover:bg-emerald-50'
-                                                    }`}
-                                                >
-                                                    <i className={`fas ${listing.status === 'active' ? 'fa-pause' : 'fa-play'} mr-1`}></i>
-                                                    {listing.status === 'active' ? 'Deactivate' : 'Activate'}
-                                                </button>
-                                                <button
-                                                    onClick={() => setShowDeleteConfirm(listing.id)}
-                                                    className="px-3 py-1.5 text-xs font-medium text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition"
-                                                >
-                                                    <i className="fas fa-trash"></i>
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {/* Delete Confirmation Overlay */}
-                                        {showDeleteConfirm === listing.id && (
-                                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-4 z-10">
-                                                <div className="bg-white rounded-lg p-5 max-w-xs w-full text-center">
-                                                    <i className="fas fa-exclamation-triangle text-red-500 text-2xl mb-3"></i>
-                                                    <p className="text-gray-800 font-medium mb-1">Delete this listing?</p>
-                                                    <p className="text-gray-500 text-sm mb-4">This cannot be undone.</p>
-                                                    <div className="flex gap-3">
-                                                        <button
-                                                            onClick={() => setShowDeleteConfirm(null)}
-                                                            className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
-                                                        >
-                                                            Cancel
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleDelete(listing.id)}
-                                                            className="flex-1 px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
-                                                        >
-                                                            Delete
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+                            </tbody>
+                        </table>
                     </div>
                 )}
+
+                {/* Help section */}
+                <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-blue-900 mb-2">
+                        <i className="fas fa-info-circle mr-2"></i>
+                        How to use this system
+                    </h3>
+                    <ul className="text-sm text-blue-800 space-y-1">
+                        <li>• Fill in the highlighted row at the top to add a new food listing, then click the <strong>+</strong> button</li>
+                        <li>• New listings are created as <strong>Active</strong> and immediately visible to community members</li>
+                        <li>• Click on any cell to edit existing data — changes save automatically on blur</li>
+                        <li>• Use the <strong>Community</strong> dropdown to assign food to a specific community</li>
+                        <li>• Change the <strong>Status</strong> dropdown to activate, deactivate, or mark as claimed</li>
+                        <li>• Use the trash icon to permanently delete a listing</li>
+                        <li>• Use <strong>Filters</strong> to narrow by community, status, or date range</li>
+                        <li>• Export to CSV for backup or reporting</li>
+                    </ul>
+                </div>
             </div>
         </AdminLayout>
     );
 }
+
+export default AdminShareFood;
