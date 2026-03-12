@@ -4,26 +4,8 @@ import Button from '../../components/common/Button';
 import supabase from '../../utils/supabaseClient';
 import { useAuthContext } from '../../utils/AuthContext';
 
-const CATEGORIES = [
-    { value: '', label: 'Select Category' },
-    { value: 'produce', label: 'Fresh Produce' },
-    { value: 'dairy', label: 'Dairy' },
-    { value: 'bakery', label: 'Bakery' },
-    { value: 'pantry', label: 'Pantry Items' },
-    { value: 'meat', label: 'Meat & Poultry' },
-    { value: 'seafood', label: 'Seafood' },
-    { value: 'frozen', label: 'Frozen' },
-    { value: 'snacks', label: 'Snacks' },
-    { value: 'beverages', label: 'Beverages' },
-    { value: 'prepared', label: 'Prepared Foods' }
-];
-
-const STATUSES = [
-    { value: 'active', label: 'Active' },
-    { value: 'pending', label: 'Pending' },
-    { value: 'claimed', label: 'Claimed' },
-    { value: 'expired', label: 'Expired' }
-];
+// Generic food image used for all bulk food listings
+const GENERIC_FOOD_IMAGE = 'https://images.unsplash.com/photo-1488459716781-31db52582fe9?w=800&q=80';
 
 // REST helper: bypasses Supabase JS client auth to avoid hanging
 async function supabaseRest(path, method, body = null, extraHeaders = {}) {
@@ -66,17 +48,16 @@ async function supabaseRest(path, method, body = null, extraHeaders = {}) {
 }
 
 // Uncontrolled input to avoid re-renders (same pattern as ImpactDataEntry)
-const UncontrolledCell = ({ defaultValue, onBlur, type = 'text', inputRef, className, placeholder }) => (
+const UncontrolledCell = ({ defaultValue, onBlur, type = 'text', inputRef, className }) => (
     <input
         ref={inputRef}
         type={type}
         defaultValue={defaultValue}
-        placeholder={placeholder}
         onBlur={(e) => {
             const value = type === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value;
             onBlur(value);
         }}
-        className={className || "w-full min-w-[150px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"}
+        className={className || "w-full min-w-[200px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"}
     />
 );
 
@@ -86,20 +67,15 @@ function AdminShareFood() {
     const [loading, setLoading] = React.useState(true);
     const [refreshing, setRefreshing] = React.useState(false);
     const [communities, setCommunities] = React.useState([]);
-    const [filterCommunity, setFilterCommunity] = React.useState('');
-    const [filterStatus, setFilterStatus] = React.useState('all');
-    const [dateFilter, setDateFilter] = React.useState('all');
+    const [dateFilter, setDateFilter] = React.useState('current-week');
 
-    // Refs for new row inputs (uncontrolled)
+    // Refs for new row inputs (uncontrolled) — same pattern as ImpactDataEntry
     const newRowRefs = React.useRef({
-        title: null,
+        date: null,
         community_id: null,
-        category: null,
+        title: null,
         quantity: null,
-        unit: null,
-        description: null,
-        expiry_date: null,
-        donor_name: null,
+        notes: null,
     });
 
     React.useEffect(() => {
@@ -113,7 +89,7 @@ function AdminShareFood() {
                 .from('communities')
                 .select('id, name')
                 .eq('is_active', true)
-                .order('name');
+                .order('name', { ascending: true });
             if (error) throw error;
             setCommunities(data || []);
         } catch (err) {
@@ -130,12 +106,13 @@ function AdminShareFood() {
                 setLoading(true);
             }
 
+            // Add a timeout to prevent infinite loading
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000);
 
             const { data: listings, error } = await supabase
                 .from('food_listings')
-                .select('*, users:user_id(id, name)')
+                .select('*')
                 .order('created_at', { ascending: false })
                 .abortSignal(controller.signal);
 
@@ -156,18 +133,15 @@ function AdminShareFood() {
         }
     };
 
-    // Filter data
+    // Filter data — same pattern as ImpactDataEntry
     const filteredData = React.useMemo(() => {
         let filtered = data;
 
-        if (filterCommunity) {
-            filtered = filtered.filter(row => String(row.community_id) === String(filterCommunity));
-        }
-        if (filterStatus !== 'all') {
-            filtered = filtered.filter(row => row.status === filterStatus);
-        }
         if (dateFilter !== 'all') {
             const now = new Date();
+            const currentYear = now.getFullYear();
+            const currentMonth = now.getMonth();
+
             filtered = filtered.filter(row => {
                 const rowDate = new Date(row.created_at);
                 switch (dateFilter) {
@@ -178,14 +152,14 @@ function AdminShareFood() {
                         return rowDate >= startOfWeek;
                     }
                     case 'current-month':
-                        return rowDate.getFullYear() === now.getFullYear() && rowDate.getMonth() === now.getMonth();
+                        return rowDate.getFullYear() === currentYear && rowDate.getMonth() === currentMonth;
                     default:
                         return true;
                 }
             });
         }
         return filtered;
-    }, [data, filterCommunity, filterStatus, dateFilter]);
+    }, [data, dateFilter]);
 
     const communityName = (id) => {
         const c = communities.find(c => String(c.id) === String(id));
@@ -195,54 +169,50 @@ function AdminShareFood() {
     // Add new row
     const handleAddRow = async () => {
         try {
-            const title = newRowRefs.current.title?.value?.trim();
+            const date = newRowRefs.current.date?.value || new Date().toISOString().split('T')[0];
             const communityId = newRowRefs.current.community_id?.value;
-            const category = newRowRefs.current.category?.value;
+            const title = newRowRefs.current.title?.value?.trim();
             const quantity = parseFloat(newRowRefs.current.quantity?.value) || 0;
-            const unit = newRowRefs.current.unit?.value || 'lb';
-            const description = newRowRefs.current.description?.value?.trim() || '';
-            const expiryDate = newRowRefs.current.expiry_date?.value || null;
-            const donorName = newRowRefs.current.donor_name?.value?.trim() || 'DoGoods Admin';
+            const notes = newRowRefs.current.notes?.value?.trim() || '';
 
-            if (!title) { alert('⚠️ Title is required.'); return; }
+            if (!title) { alert('⚠️ Food name is required.'); return; }
             if (!communityId) { alert('⚠️ Please select a community.'); return; }
-            if (!category) { alert('⚠️ Please select a category.'); return; }
-            if (!quantity) { alert('⚠️ Quantity is required.'); return; }
+            if (!quantity) { alert('⚠️ Quantity (lb) is required.'); return; }
 
             const newListing = {
                 title,
-                description,
-                category,
+                description: notes,
+                category: 'produce',
                 quantity,
-                unit,
+                unit: 'lb',
                 community_id: communityId,
-                expiry_date: expiryDate,
-                donor_name: donorName,
+                donor_name: 'DoGoods Admin',
                 donor_type: 'organization',
                 listing_type: 'donation',
                 status: 'active',
+                image_url: GENERIC_FOOD_IMAGE,
                 user_id: user?.id || null,
+                created_at: new Date(date + 'T12:00:00').toISOString(),
             };
+
+            console.log('Attempting to insert food listing:', newListing);
 
             await supabaseRest('food_listings', 'POST', newListing, { 'Prefer': 'return=minimal' });
 
             // Reset inputs
-            if (newRowRefs.current.title) newRowRefs.current.title.value = '';
+            if (newRowRefs.current.date) newRowRefs.current.date.value = new Date().toISOString().split('T')[0];
             if (newRowRefs.current.community_id) newRowRefs.current.community_id.value = '';
-            if (newRowRefs.current.category) newRowRefs.current.category.value = '';
+            if (newRowRefs.current.title) newRowRefs.current.title.value = '';
             if (newRowRefs.current.quantity) newRowRefs.current.quantity.value = '';
-            if (newRowRefs.current.unit) newRowRefs.current.unit.value = 'lb';
-            if (newRowRefs.current.description) newRowRefs.current.description.value = '';
-            if (newRowRefs.current.expiry_date) newRowRefs.current.expiry_date.value = '';
-            if (newRowRefs.current.donor_name) newRowRefs.current.donor_name.value = '';
+            if (newRowRefs.current.notes) newRowRefs.current.notes.value = '';
 
             await fetchData(true);
-            alert('✅ Food listing added!');
+            alert('✅ Bulk food listing added!');
         } catch (error) {
             console.error('Error adding food listing:', error);
             const msg = error.message || error.toString();
             if (msg.includes('Failed to fetch')) {
-                alert('❌ Network error: Cannot connect to database.');
+                alert('❌ Network error: Cannot connect to database. Please check:\n1. Your internet connection\n2. Supabase configuration in .env.local\n3. Browser console for details');
             } else if (msg.includes('JWT')) {
                 alert('❌ Authentication error: Please log out and log back in.');
             } else {
@@ -260,7 +230,7 @@ function AdminShareFood() {
                 { [field]: value, updated_at: new Date().toISOString() },
                 { 'Prefer': 'return=minimal' }
             );
-            // Update local
+            // Update local data after successful save
             setData(prev => prev.map(row =>
                 row.id === id ? { ...row, [field]: value } : row
             ));
@@ -285,17 +255,12 @@ function AdminShareFood() {
 
     // Export CSV
     const exportToCSV = () => {
-        const headers = ['Created', 'Title', 'Community', 'Category', 'Quantity', 'Unit', 'Status', 'Expiry Date', 'Donor', 'Description'];
+        const headers = ['Date', 'Community', 'Food Name', 'Quantity (lb)', 'Notes'];
         const rows = filteredData.map(row => [
             row.created_at ? new Date(row.created_at).toLocaleDateString() : '',
-            row.title || '',
             communityName(row.community_id),
-            row.category || '',
+            row.title || '',
             row.quantity || 0,
-            row.unit || '',
-            row.status || '',
-            row.expiry_date || '',
-            row.donor_name || '',
             (row.description || '').replace(/"/g, '""')
         ]);
 
@@ -306,7 +271,7 @@ function AdminShareFood() {
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `food_listings_${new Date().toISOString().split('T')[0]}.csv`;
+        link.download = `bulk_food_listings_${new Date().toISOString().split('T')[0]}.csv`;
         link.style.visibility = 'hidden';
         document.body.appendChild(link);
         link.click();
@@ -319,8 +284,8 @@ function AdminShareFood() {
                 {/* Header */}
                 <div className="mb-6 flex justify-between items-center">
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-900">Share Food to Communities</h1>
-                        <p className="mt-2 text-gray-600">Add and manage food listings for any community — spreadsheet style</p>
+                        <h1 className="text-2xl font-bold text-gray-900">Bulk Food Entry</h1>
+                        <p className="mt-2 text-gray-600">Add bulk food listings for communities — data entry style</p>
                     </div>
                     <div className="flex space-x-3">
                         <Button
@@ -341,56 +306,48 @@ function AdminShareFood() {
                     </div>
                 </div>
 
-                {/* Filters */}
+                {/* Date Filter Controls — exact same as ImpactDataEntry */}
                 <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <div className="flex items-center justify-between flex-wrap gap-4">
                         <div className="flex items-center gap-2">
                             <i className="fas fa-filter text-blue-600"></i>
-                            <span className="font-medium text-gray-700">Filters:</span>
+                            <span className="font-medium text-gray-700">Show entries from:</span>
                         </div>
-                        <div className="flex gap-3 flex-wrap items-center">
-                            <select
-                                value={filterCommunity}
-                                onChange={(e) => setFilterCommunity(e.target.value)}
-                                className="px-3 py-2 rounded-md text-sm border border-gray-300 focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                        <div className="flex gap-2 flex-wrap">
+                            <button
+                                onClick={() => setDateFilter('current-week')}
+                                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                                    dateFilter === 'current-week'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-white text-gray-700 hover:bg-blue-100'
+                                }`}
                             >
-                                <option value="">All Communities</option>
-                                {communities.map(c => (
-                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                ))}
-                            </select>
-                            <select
-                                value={filterStatus}
-                                onChange={(e) => setFilterStatus(e.target.value)}
-                                className="px-3 py-2 rounded-md text-sm border border-gray-300 focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                Current Week
+                            </button>
+                            <button
+                                onClick={() => setDateFilter('current-month')}
+                                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                                    dateFilter === 'current-month'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-white text-gray-700 hover:bg-blue-100'
+                                }`}
                             >
-                                <option value="all">All Statuses</option>
-                                {STATUSES.map(s => (
-                                    <option key={s.value} value={s.value}>{s.label}</option>
-                                ))}
-                            </select>
-                            <div className="flex gap-1">
-                                {[
-                                    { value: 'current-week', label: 'This Week' },
-                                    { value: 'current-month', label: 'This Month' },
-                                    { value: 'all', label: 'All' }
-                                ].map(df => (
-                                    <button
-                                        key={df.value}
-                                        onClick={() => setDateFilter(df.value)}
-                                        className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                                            dateFilter === df.value
-                                                ? 'bg-blue-600 text-white'
-                                                : 'bg-white text-gray-700 hover:bg-blue-100'
-                                        }`}
-                                    >
-                                        {df.label}
-                                    </button>
-                                ))}
-                            </div>
+                                Current Month
+                            </button>
+                            <button
+                                onClick={() => setDateFilter('all')}
+                                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                                    dateFilter === 'all'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-white text-gray-700 hover:bg-blue-100'
+                                }`}
+                            >
+                                <i className="fas fa-archive mr-1"></i>
+                                All (Archived)
+                            </button>
                         </div>
                         <div className="text-sm text-gray-600">
-                            Showing <span className="font-semibold text-blue-700">{filteredData.length}</span> of <span className="font-semibold">{data.length}</span> total listings
+                            Showing <span className="font-semibold text-blue-700">{filteredData.length}</span> of <span className="font-semibold">{data.length}</span> total entries
                         </div>
                     </div>
                 </div>
@@ -399,60 +356,48 @@ function AdminShareFood() {
                 {loading ? (
                     <div className="p-8 text-center">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2CABE3] mx-auto"></div>
-                        <p className="mt-4 text-gray-600">Loading food listings...</p>
+                        <p className="mt-4 text-gray-600">Loading data...</p>
                     </div>
                 ) : (
                     <div className="bg-white rounded-lg shadow overflow-x-auto">
                         <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50 sticky top-0">
                                 <tr>
-                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
-                                        Title
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[220px]">
+                                        Date
                                     </th>
-                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[280px]">
                                         Community
                                     </th>
-                                    <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[140px]">
-                                        Category
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[280px]">
+                                        Food Name
                                     </th>
-                                    <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[80px]">
-                                        Qty
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[110px]">
+                                        Quantity (lb)
                                     </th>
-                                    <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[80px]">
-                                        Unit
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[300px]">
+                                        Notes
                                     </th>
-                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[250px]">
-                                        Description
-                                    </th>
-                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[140px]">
-                                        Expiry Date
-                                    </th>
-                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
-                                        Donor
-                                    </th>
-                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                                        Status
-                                    </th>
-                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
                                         Actions
                                     </th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {/* New row (highlighted) */}
+                                {/* New row (highlighted) — same as ImpactDataEntry */}
                                 <tr className="bg-[#2CABE3]/10">
                                     <td className="px-3 py-2">
                                         <UncontrolledCell
-                                            defaultValue=""
-                                            inputRef={el => newRowRefs.current.title = el}
+                                            type="date"
+                                            defaultValue={new Date().toISOString().split('T')[0]}
+                                            inputRef={el => newRowRefs.current.date = el}
                                             onBlur={() => {}}
-                                            placeholder="Food title"
                                         />
                                     </td>
                                     <td className="px-3 py-2">
                                         <select
                                             ref={el => newRowRefs.current.community_id = el}
-                                            className="w-full min-w-[150px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                            className="w-full min-w-[200px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
                                         >
                                             <option value="">Select Community</option>
                                             {communities.map(c => (
@@ -461,14 +406,11 @@ function AdminShareFood() {
                                         </select>
                                     </td>
                                     <td className="px-3 py-2">
-                                        <select
-                                            ref={el => newRowRefs.current.category = el}
-                                            className="w-full min-w-[120px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
-                                        >
-                                            {CATEGORIES.map(c => (
-                                                <option key={c.value} value={c.value}>{c.label}</option>
-                                            ))}
-                                        </select>
+                                        <UncontrolledCell
+                                            defaultValue=""
+                                            inputRef={el => newRowRefs.current.title = el}
+                                            onBlur={() => {}}
+                                        />
                                     </td>
                                     <td className="px-3 py-2">
                                         <UncontrolledCell
@@ -476,50 +418,15 @@ function AdminShareFood() {
                                             defaultValue=""
                                             inputRef={el => newRowRefs.current.quantity = el}
                                             onBlur={() => {}}
-                                            placeholder="0"
-                                            className="w-full min-w-[60px] px-2 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
-                                        />
-                                    </td>
-                                    <td className="px-3 py-2">
-                                        <select
-                                            ref={el => newRowRefs.current.unit = el}
-                                            defaultValue="lb"
-                                            className="w-full min-w-[60px] px-2 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
-                                        >
-                                            <option value="lb">lb</option>
-                                            <option value="oz">oz</option>
-                                            <option value="kg">kg</option>
-                                            <option value="g">g</option>
-                                            <option value="count">count</option>
-                                            <option value="serving">serving</option>
-                                        </select>
-                                    </td>
-                                    <td className="px-3 py-2">
-                                        <UncontrolledCell
-                                            defaultValue=""
-                                            inputRef={el => newRowRefs.current.description = el}
-                                            onBlur={() => {}}
-                                            placeholder="Description"
-                                        />
-                                    </td>
-                                    <td className="px-3 py-2">
-                                        <UncontrolledCell
-                                            type="date"
-                                            defaultValue=""
-                                            inputRef={el => newRowRefs.current.expiry_date = el}
-                                            onBlur={() => {}}
+                                            className="w-full min-w-[80px] px-2 py-2 text-sm border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
                                         />
                                     </td>
                                     <td className="px-3 py-2">
                                         <UncontrolledCell
                                             defaultValue=""
-                                            inputRef={el => newRowRefs.current.donor_name = el}
+                                            inputRef={el => newRowRefs.current.notes = el}
                                             onBlur={() => {}}
-                                            placeholder="DoGoods Admin"
                                         />
-                                    </td>
-                                    <td className="px-3 py-2">
-                                        <span className="text-sm text-emerald-700 font-medium">Active</span>
                                     </td>
                                     <td className="px-3 py-2">
                                         <Button
@@ -537,89 +444,42 @@ function AdminShareFood() {
                                     <tr key={row.id} className="hover:bg-gray-50">
                                         <td className="px-3 py-2">
                                             <UncontrolledCell
-                                                defaultValue={row.title || ''}
-                                                onBlur={(val) => handleUpdateRow(row.id, 'title', val)}
+                                                type="date"
+                                                defaultValue={row.created_at ? row.created_at.split('T')[0] : ''}
+                                                onBlur={(val) => handleUpdateRow(row.id, 'created_at', new Date(val + 'T12:00:00').toISOString())}
                                             />
                                         </td>
                                         <td className="px-3 py-2">
                                             <select
                                                 value={row.community_id || ''}
                                                 onChange={(e) => handleUpdateRow(row.id, 'community_id', e.target.value)}
-                                                className="w-full min-w-[150px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                                className="w-full min-w-[200px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
                                             >
-                                                <option value="">No Community</option>
+                                                <option value="">Select Community</option>
                                                 {communities.map(c => (
                                                     <option key={c.id} value={c.id}>{c.name}</option>
                                                 ))}
                                             </select>
                                         </td>
                                         <td className="px-3 py-2">
-                                            <select
-                                                value={row.category || ''}
-                                                onChange={(e) => handleUpdateRow(row.id, 'category', e.target.value)}
-                                                className="w-full min-w-[120px] px-3 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
-                                            >
-                                                {CATEGORIES.map(c => (
-                                                    <option key={c.value} value={c.value}>{c.label}</option>
-                                                ))}
-                                            </select>
+                                            <UncontrolledCell
+                                                defaultValue={row.title || ''}
+                                                onBlur={(val) => handleUpdateRow(row.id, 'title', val)}
+                                            />
                                         </td>
                                         <td className="px-3 py-2">
                                             <UncontrolledCell
                                                 type="number"
                                                 defaultValue={row.quantity || 0}
                                                 onBlur={(val) => handleUpdateRow(row.id, 'quantity', val)}
-                                                className="w-full min-w-[60px] px-2 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                                className="w-full min-w-[80px] px-2 py-2 text-sm border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
                                             />
-                                        </td>
-                                        <td className="px-3 py-2">
-                                            <select
-                                                value={row.unit || 'lb'}
-                                                onChange={(e) => handleUpdateRow(row.id, 'unit', e.target.value)}
-                                                className="w-full min-w-[60px] px-2 py-3 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
-                                            >
-                                                <option value="lb">lb</option>
-                                                <option value="oz">oz</option>
-                                                <option value="kg">kg</option>
-                                                <option value="g">g</option>
-                                                <option value="count">count</option>
-                                                <option value="serving">serving</option>
-                                            </select>
                                         </td>
                                         <td className="px-3 py-2">
                                             <UncontrolledCell
                                                 defaultValue={row.description || ''}
                                                 onBlur={(val) => handleUpdateRow(row.id, 'description', val)}
                                             />
-                                        </td>
-                                        <td className="px-3 py-2">
-                                            <UncontrolledCell
-                                                type="date"
-                                                defaultValue={row.expiry_date || ''}
-                                                onBlur={(val) => handleUpdateRow(row.id, 'expiry_date', val || null)}
-                                            />
-                                        </td>
-                                        <td className="px-3 py-2">
-                                            <UncontrolledCell
-                                                defaultValue={row.donor_name || ''}
-                                                onBlur={(val) => handleUpdateRow(row.id, 'donor_name', val)}
-                                            />
-                                        </td>
-                                        <td className="px-3 py-2">
-                                            <select
-                                                value={row.status || 'active'}
-                                                onChange={(e) => handleUpdateRow(row.id, 'status', e.target.value)}
-                                                className={`w-full min-w-[80px] px-2 py-3 text-sm font-medium border rounded focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent ${
-                                                    row.status === 'active' ? 'border-emerald-300 text-emerald-700 bg-emerald-50' :
-                                                    row.status === 'pending' ? 'border-yellow-300 text-yellow-700 bg-yellow-50' :
-                                                    row.status === 'claimed' ? 'border-blue-300 text-blue-700 bg-blue-50' :
-                                                    'border-gray-300 text-gray-700 bg-gray-50'
-                                                }`}
-                                            >
-                                                {STATUSES.map(s => (
-                                                    <option key={s.value} value={s.value}>{s.label}</option>
-                                                ))}
-                                            </select>
                                         </td>
                                         <td className="px-3 py-2">
                                             <Button
@@ -635,8 +495,8 @@ function AdminShareFood() {
 
                                 {filteredData.length === 0 && (
                                     <tr>
-                                        <td colSpan="10" className="px-6 py-8 text-center text-gray-500">
-                                            No food listings yet. Add your first listing using the row above.
+                                        <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
+                                            No food listings yet. Add your first entry using the row above.
                                         </td>
                                     </tr>
                                 )}
@@ -652,14 +512,12 @@ function AdminShareFood() {
                         How to use this system
                     </h3>
                     <ul className="text-sm text-blue-800 space-y-1">
-                        <li>• Fill in the highlighted row at the top to add a new food listing, then click the <strong>+</strong> button</li>
-                        <li>• New listings are created as <strong>Active</strong> and immediately visible to community members</li>
-                        <li>• Click on any cell to edit existing data — changes save automatically on blur</li>
-                        <li>• Use the <strong>Community</strong> dropdown to assign food to a specific community</li>
-                        <li>• Change the <strong>Status</strong> dropdown to activate, deactivate, or mark as claimed</li>
-                        <li>• Use the trash icon to permanently delete a listing</li>
-                        <li>• Use <strong>Filters</strong> to narrow by community, status, or date range</li>
-                        <li>• Export to CSV for backup or reporting</li>
+                        <li>• <strong>Bulk Food Entry:</strong> Quickly add food donations to any community</li>
+                        <li>• Fill in the colored row at the top to add a new entry, then click the + button</li>
+                        <li>• All entries use a generic food image and are set to Active status automatically</li>
+                        <li>• Click on any cell to edit existing data — changes save automatically</li>
+                        <li>• Use the trash icon to delete entries</li>
+                        <li>• Export to CSV for backup or analysis</li>
                     </ul>
                 </div>
             </div>
