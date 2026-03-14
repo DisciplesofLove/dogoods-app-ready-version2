@@ -154,6 +154,7 @@ function AdminShareFood() {
             const { data: listings, error } = await supabase
                 .from('food_listings')
                 .select('*')
+                .eq('donor_type', 'organization')
                 .order('created_at', { ascending: false })
                 .abortSignal(controller.signal);
 
