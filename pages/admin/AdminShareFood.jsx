@@ -316,7 +316,7 @@ function AdminShareFood() {
 
     // Export CSV
     const exportToCSV = () => {
-        const headers = ['Date', 'Community', 'Food Name', 'Quantity (lb)', 'Pickup By', 'Expiry Date', 'Pickup Address', 'Donor', 'Notes'];
+        const headers = ['Date', 'Community', 'Food Name', 'Quantity (lb)', 'Pickup By', 'Expiry Date', 'Pickup Address', 'Donor', 'Description'];
         const rows = filteredData.map(row => [
             row.created_at ? new Date(row.created_at).toLocaleDateString() : '',
             communityName(row.community_id),
@@ -453,7 +453,7 @@ function AdminShareFood() {
                                         Donor
                                     </th>
                                     <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[300px]">
-                                        Notes
+                                        Description
                                     </th>
                                     <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
                                         Actions
