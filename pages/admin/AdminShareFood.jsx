@@ -215,6 +215,7 @@ function AdminShareFood() {
             const communityId = newRowRefs.current.community_id?.value;
             const title = newRowRefs.current.title?.value?.trim();
             const quantity = parseFloat(newRowRefs.current.quantity?.value) || 0;
+            const unit = newRowRefs.current.unit?.value || 'lb';
             const pickupBy = newRowRefs.current.pickup_by?.value || null;
             const expiryDate = newRowRefs.current.expiry_date?.value || null;
             const fullAddress = newRowRefs.current.full_address?.value?.trim() || '';
@@ -233,7 +234,7 @@ function AdminShareFood() {
                 description: notes,
                 category: 'produce',
                 quantity,
-                unit: 'lb',
+                unit,
                 community_id: parseInt(communityId, 10),
                 pickup_by: pickupBy ? new Date(pickupBy + 'T17:00:00').toISOString() : null,
                 expiry_date: expiryDate || null,
@@ -261,6 +262,7 @@ function AdminShareFood() {
             if (newRowRefs.current.community_id) newRowRefs.current.community_id.value = '';
             if (newRowRefs.current.title) newRowRefs.current.title.value = '';
             if (newRowRefs.current.quantity) newRowRefs.current.quantity.value = '';
+            if (newRowRefs.current.unit) newRowRefs.current.unit.value = 'lb';
             if (newRowRefs.current.pickup_by) newRowRefs.current.pickup_by.value = '';
             if (newRowRefs.current.expiry_date) newRowRefs.current.expiry_date.value = '';
             if (newRowRefs.current.full_address) newRowRefs.current.full_address.value = '';
@@ -316,12 +318,13 @@ function AdminShareFood() {
 
     // Export CSV
     const exportToCSV = () => {
-        const headers = ['Date', 'Community', 'Food Name', 'Quantity (lb)', 'Pickup By', 'Expiry Date', 'Pickup Address', 'Donor', 'Description'];
+        const headers = ['Date', 'Community', 'Food Name', 'Quantity', 'Unit', 'Pickup By', 'Expiry Date', 'Pickup Address', 'Donor', 'Description'];
         const rows = filteredData.map(row => [
             row.created_at ? new Date(row.created_at).toLocaleDateString() : '',
             communityName(row.community_id),
             row.title || '',
             row.quantity || 0,
+            row.unit || 'lb',
             row.pickup_by ? new Date(row.pickup_by).toLocaleDateString() : '',
             row.expiry_date || '',
             row.full_address || '',
@@ -438,7 +441,10 @@ function AdminShareFood() {
                                         Food Name
                                     </th>
                                     <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[110px]">
-                                        Quantity (lb)
+                                        Quantity
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[100px]">
+                                        Unit
                                     </th>
                                     <th className="px-3 py-3 text-left text-xs font-medium text-orange-600 uppercase tracking-wider min-w-[160px]">
                                         Pickup By
@@ -497,6 +503,22 @@ function AdminShareFood() {
                                             onBlur={() => {}}
                                             className="w-full min-w-[80px] px-2 py-2 text-sm border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
                                         />
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        <select
+                                            ref={el => newRowRefs.current.unit = el}
+                                            defaultValue="lb"
+                                            className="w-full min-w-[80px] px-2 py-2 text-sm border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                        >
+                                            <option value="lb">lb</option>
+                                            <option value="kg">kg</option>
+                                            <option value="oz">oz</option>
+                                            <option value="items">items</option>
+                                            <option value="servings">servings</option>
+                                            <option value="boxes">boxes</option>
+                                            <option value="cases">cases</option>
+                                            <option value="pallets">pallets</option>
+                                        </select>
                                     </td>
                                     <td className="px-3 py-2">
                                         <UncontrolledCell
@@ -583,6 +605,22 @@ function AdminShareFood() {
                                             />
                                         </td>
                                         <td className="px-3 py-2">
+                                            <select
+                                                value={row.unit || 'lb'}
+                                                onChange={(e) => handleUpdateRow(row.id, 'unit', e.target.value)}
+                                                className="w-full min-w-[80px] px-2 py-2 text-sm border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
+                                            >
+                                                <option value="lb">lb</option>
+                                                <option value="kg">kg</option>
+                                                <option value="oz">oz</option>
+                                                <option value="items">items</option>
+                                                <option value="servings">servings</option>
+                                                <option value="boxes">boxes</option>
+                                                <option value="cases">cases</option>
+                                                <option value="pallets">pallets</option>
+                                            </select>
+                                        </td>
+                                        <td className="px-3 py-2">
                                             <UncontrolledCell
                                                 type="date"
                                                 defaultValue={row.pickup_by ? row.pickup_by.split('T')[0] : ''}
@@ -628,7 +666,7 @@ function AdminShareFood() {
 
                                 {filteredData.length === 0 && (
                                     <tr>
-                                        <td colSpan="10" className="px-6 py-8 text-center text-gray-500">
+                                        <td colSpan="11" className="px-6 py-8 text-center text-gray-500">
                                             No food listings yet. Add your first entry using the row above.
                                         </td>
                                     </tr>
