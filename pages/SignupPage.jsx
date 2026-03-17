@@ -153,21 +153,26 @@ function SignupPageContent() {
                     })
                     .eq('code', codeValue);
 
-                if (session || emailRateLimited) {
-                    // User was auto-confirmed, or email was rate limited (account still created)
-                    navigate('/login', { 
-                        state: { message: emailRateLimited
-                            ? 'Account created! Sign in below. (Confirmation email could not be sent — contact your admin if you have issues.)'
-                            : 'Account created successfully! Please sign in.' },
-                        replace: true 
-                    });
-                } else {
-                    // Email confirmation required
-                    navigate('/email-confirmation', { 
-                        state: { email: formData.email.toLowerCase().trim() },
-                        replace: true 
-                    });
+                // Auto-confirm email via Edge Function (bypasses Supabase email rate limits)
+                // The edge function verifies the claimed approval code before confirming
+                if (!session) {
+                    try {
+                        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+                        await fetch(`${supabaseUrl}/functions/v1/confirm-signup`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ userId: user.id })
+                        });
+                    } catch (confirmErr) {
+                        // Non-fatal: log but continue — user may still need to confirm via email
+                        console.warn('Auto-confirm failed:', confirmErr);
+                    }
                 }
+
+                navigate('/login', { 
+                    state: { message: 'Account created successfully! Please sign in.' },
+                    replace: true 
+                });
             }
         } catch (error) {
             console.error('Signup error:', error);
