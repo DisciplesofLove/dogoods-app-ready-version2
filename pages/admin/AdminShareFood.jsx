@@ -234,7 +234,7 @@ function AdminShareFood() {
 
             if (!title) { alert('⚠️ Food name is required.'); return; }
             if (!communityId) { alert('⚠️ Please select a community.'); return; }
-            if (!quantity) { alert('⚠️ Quantity (lb) is required.'); return; }
+            if (!quantity) { alert('⚠️ Quantity is required.'); return; }
 
             // Geocode address to get lat/lng for map display
             const geo = await geocodeAddress(fullAddress);
@@ -454,7 +454,7 @@ function AdminShareFood() {
                                         Quantity
                                     </th>
                                     <th className="px-3 py-3 text-left text-xs font-medium text-[#2CABE3] uppercase tracking-wider min-w-[100px]">
-                                        Unit
+                                        Packaging
                                     </th>
                                     <th className="px-3 py-3 text-left text-xs font-medium text-orange-600 uppercase tracking-wider min-w-[160px]">
                                         Pickup By
@@ -523,17 +523,14 @@ function AdminShareFood() {
                                     <td className="px-3 py-2">
                                         <select
                                             ref={el => newRowRefs.current.unit = el}
-                                            defaultValue="lb"
+                                            defaultValue="items"
                                             className="w-full min-w-[80px] px-2 py-2 text-sm border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
                                         >
-                                            <option value="lb">lb</option>
-                                            <option value="kg">kg</option>
-                                            <option value="oz">oz</option>
                                             <option value="items">items</option>
                                             <option value="servings">servings</option>
                                             <option value="boxes">boxes</option>
-                                            <option value="cases">cases</option>
-                                            <option value="pallets">pallets</option>
+                                            <option value="bags">bags</option>
+                                            <option value="cans">cans</option>
                                         </select>
                                     </td>
                                     <td className="px-3 py-2">
@@ -622,18 +619,15 @@ function AdminShareFood() {
                                         </td>
                                         <td className="px-3 py-2">
                                             <select
-                                                value={row.unit || 'lb'}
+                                                value={row.unit || 'items'}
                                                 onChange={(e) => handleUpdateRow(row.id, 'unit', e.target.value)}
                                                 className="w-full min-w-[80px] px-2 py-2 text-sm border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#2CABE3] focus:border-transparent"
                                             >
-                                                <option value="lb">lb</option>
-                                                <option value="kg">kg</option>
-                                                <option value="oz">oz</option>
                                                 <option value="items">items</option>
                                                 <option value="servings">servings</option>
                                                 <option value="boxes">boxes</option>
-                                                <option value="cases">cases</option>
-                                                <option value="pallets">pallets</option>
+                                                <option value="bags">bags</option>
+                                                <option value="cans">cans</option>
                                             </select>
                                         </td>
                                         <td className="px-3 py-2">
