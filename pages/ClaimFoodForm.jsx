@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Button from "../components/common/Button";
-import supabase from "../utils/supabaseClient";
+import supabase, { SUPABASE_AUTH_KEY } from "../utils/supabaseClient";
 import communitiesStatic from '../utils/communities';
 import twilioService from '../utils/twilioService';
 import { useAuthContext } from '../utils/AuthContext';
@@ -168,7 +168,7 @@ export default function ClaimFoodForm() {
                 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
                 let accessToken = supabaseKey;
                 try {
-                    const session = JSON.parse(localStorage.getItem('sb-ifzbpqyuhnxbhdcnmvfs-auth-token') || '{}');
+                    const session = JSON.parse(localStorage.getItem(SUPABASE_AUTH_KEY) || '{}');
                     if (session?.access_token) accessToken = session.access_token;
                 } catch (_) { /* use anon key */ }
 

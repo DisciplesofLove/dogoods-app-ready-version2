@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import PropTypes from 'prop-types';
-import supabase from '../../utils/supabaseClient';
+import supabase, { SUPABASE_AUTH_KEY } from '../../utils/supabaseClient';
 import { formatDate } from '../../utils/helpers';
 
 // REST helper for food_listings updates (avoids RLS issues for non-owner updates)
@@ -9,7 +9,7 @@ async function patchFoodListings(ids, status) {
     const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
     let accessToken = supabaseKey;
     try {
-        const session = JSON.parse(localStorage.getItem('sb-ifzbpqyuhnxbhdcnmvfs-auth-token') || '{}');
+        const session = JSON.parse(localStorage.getItem(SUPABASE_AUTH_KEY) || '{}');
         if (session?.access_token) accessToken = session.access_token;
     } catch (_) { /* use anon key */ }
 

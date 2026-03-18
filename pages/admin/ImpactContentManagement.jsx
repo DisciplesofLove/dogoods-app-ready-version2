@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import supabase from '../../utils/supabaseClient';
+import supabase, { SUPABASE_AUTH_KEY } from '../../utils/supabaseClient';
 import { toast } from 'react-toastify';
 
 function ImpactContentManagement() {
@@ -100,7 +100,7 @@ function ImpactContentManagement() {
             // Get token from localStorage directly (avoids getSession() which can hang)
             let accessToken = supabaseKey;
             try {
-                const sessionData = JSON.parse(localStorage.getItem('sb-ifzbpqyuhnxbhdcnmvfs-auth-token') || '{}');
+                const sessionData = JSON.parse(localStorage.getItem(SUPABASE_AUTH_KEY) || '{}');
                 if (sessionData?.access_token) {
                     accessToken = sessionData.access_token;
                 }
@@ -160,7 +160,7 @@ function ImpactContentManagement() {
         // Get token from localStorage directly (avoids getSession() which can hang)
         let accessToken = supabaseKey;
         try {
-            const sessionData = JSON.parse(localStorage.getItem('sb-ifzbpqyuhnxbhdcnmvfs-auth-token') || '{}');
+            const sessionData = JSON.parse(localStorage.getItem(SUPABASE_AUTH_KEY) || '{}');
             if (sessionData?.access_token) {
                 accessToken = sessionData.access_token;
                 console.log('[ImpactCMS] Using token from localStorage');

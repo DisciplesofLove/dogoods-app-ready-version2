@@ -1,4 +1,4 @@
-import supabase from './supabaseClient.js'
+import supabase, { SUPABASE_AUTH_KEY } from './supabaseClient.js'
 import { reportError } from './helpers.js'
 import communities from './communities.js'
 
@@ -548,7 +548,7 @@ class DataService {
       let userId = listingData.user_id;
       if (!userId) {
         try {
-          const sessionData = JSON.parse(localStorage.getItem('sb-ifzbpqyuhnxbhdcnmvfs-auth-token') || '{}');
+          const sessionData = JSON.parse(localStorage.getItem(SUPABASE_AUTH_KEY) || '{}');
           userId = sessionData?.user?.id;
         } catch (e) {
           console.warn('[createFoodListing] Failed to read user from localStorage');
@@ -627,7 +627,7 @@ class DataService {
 
       let accessToken = supabaseKey;
       try {
-        const sessionData = JSON.parse(localStorage.getItem('sb-ifzbpqyuhnxbhdcnmvfs-auth-token') || '{}');
+        const sessionData = JSON.parse(localStorage.getItem(SUPABASE_AUTH_KEY) || '{}');
         if (sessionData?.access_token) accessToken = sessionData.access_token;
       } catch (e) { /* use anon key */ }
 
@@ -1470,7 +1470,7 @@ class DataService {
 
       // Verify user is authenticated via localStorage (avoids getUser() which can hang)
       try {
-        const sessionData = JSON.parse(localStorage.getItem('sb-ifzbpqyuhnxbhdcnmvfs-auth-token') || '{}');
+        const sessionData = JSON.parse(localStorage.getItem(SUPABASE_AUTH_KEY) || '{}');
         if (!sessionData?.access_token) {
           throw new Error('User must be authenticated to upload files');
         }

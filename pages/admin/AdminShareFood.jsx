@@ -1,7 +1,7 @@
 import React from 'react';
 import AdminLayout from './AdminLayout';
 import Button from '../../components/common/Button';
-import supabase from '../../utils/supabaseClient';
+import supabase, { SUPABASE_AUTH_KEY } from '../../utils/supabaseClient';
 import { useAuthContext } from '../../utils/AuthContext';
 import { API_CONFIG } from '../../utils/config';
 
@@ -61,7 +61,7 @@ async function supabaseRest(path, method, body = null, extraHeaders = {}) {
 
     let accessToken = supabaseKey;
     try {
-        const sessionData = JSON.parse(localStorage.getItem('sb-ifzbpqyuhnxbhdcnmvfs-auth-token') || '{}');
+        const sessionData = JSON.parse(localStorage.getItem(SUPABASE_AUTH_KEY) || '{}');
         if (sessionData?.access_token) accessToken = sessionData.access_token;
     } catch (e) { /* use anon key */ }
 

@@ -36,4 +36,9 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   }
 })
 
+// Derive the localStorage key Supabase uses for auth tokens
+// Format: sb-{project_ref}-auth-token where project_ref is the subdomain
+const projectRef = new URL(supabaseUrl).hostname.split('.')[0]
+export const SUPABASE_AUTH_KEY = `sb-${projectRef}-auth-token`
+
 export default supabase
