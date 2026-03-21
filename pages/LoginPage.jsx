@@ -1,5 +1,4 @@
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "../utils/hooks/useSupabase";
 import { useAuthContext } from "../utils/AuthContext";
 import Button from "../components/common/Button";
 import Input from "../components/common/Input";
@@ -8,8 +7,7 @@ import React from "react";
 function LoginPage() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const { signIn } = useAuth();
-    const { isAuthenticated, loading: authLoading } = useAuthContext();
+    const { signIn, isAuthenticated, loading: authLoading } = useAuthContext();
     const [formData, setFormData] = React.useState({
         email: '',
         password: '',

@@ -12,6 +12,7 @@ function VerificationManagement() {
   const [disputes, setDisputes] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all'); // all, pending, disputed, completed
   const [selectedListing, setSelectedListing] = useState(null);
 
@@ -33,6 +34,7 @@ function VerificationManagement() {
       setDisputes([]);
     } catch (error) {
       console.error('Failed to load verification data:', error);
+      setError('Failed to load verification data. Please try again.');
     } finally {
       setLoading(false);
     }

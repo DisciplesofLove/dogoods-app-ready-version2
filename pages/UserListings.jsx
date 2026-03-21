@@ -69,6 +69,14 @@ function UserListings() {
         try {
             const csvContent = "title,description,quantity,unit,expiry_date,category\nOrganic Apples,Fresh locally grown apples,5,kg,2024-12-31,produce\nSourdough Bread,Freshly baked this morning,2,loaves,2024-12-25,bakery";
             const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'food-listing-template.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         } catch (error) {
             console.error('Download template error:', error);
         }

@@ -117,6 +117,7 @@ class ImpactService {
     unsubscribeFromImpactUpdates(channel) {
         if (channel) {
             console.log('[ImpactService] Unsubscribing from real-time updates');
+            channel.unsubscribe();
             supabase.removeChannel(channel);
         }
     }

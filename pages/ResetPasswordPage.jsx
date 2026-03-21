@@ -82,10 +82,10 @@ function ResetPasswordPage() {
                 if (resolvedRef.current) return;
                 console.log('🔑 Reset page: fallback session check...');
                 try {
-                    // Race getSession against a 5s timeout
+                    // Race getSession against a 10s timeout
                     const sessionPromise = supabase.auth.getSession();
                     const timeoutPromise = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('Session check timed out')), 5000)
+                        setTimeout(() => reject(new Error('Session check timed out')), 10000)
                     );
                     const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
                     if (session) {

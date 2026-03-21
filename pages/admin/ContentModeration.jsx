@@ -11,7 +11,9 @@ const ContentModeration = () => {
 
   React.useEffect(() => {
     fetchContent();
+  }, [filter]);
 
+  React.useEffect(() => {
     const foodSubscription = supabase
       .channel('content-moderation-food')
       .on(
@@ -45,10 +47,12 @@ const ContentModeration = () => {
       .subscribe();
 
     return () => {
+      foodSubscription.unsubscribe();
       supabase.removeChannel(foodSubscription);
+      postsSubscription.unsubscribe();
       supabase.removeChannel(postsSubscription);
     };
-  }, [filter]);
+  }, []);
 
   const fetchContent = async () => {
     try {

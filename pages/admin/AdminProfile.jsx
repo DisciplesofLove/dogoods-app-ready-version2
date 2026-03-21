@@ -23,6 +23,7 @@ function AdminProfile() {
     try {
         const [loading, setLoading] = React.useState(false);
         const [error, setError] = React.useState(null);
+        const [errors, setErrors] = React.useState({});
         const [isEditing, setIsEditing] = React.useState(false);
         const [editForm, setEditForm] = React.useState({
             name: '',
@@ -111,7 +112,7 @@ function AdminProfile() {
                         <p className="text-gray-600 mb-4">{error}</p>
                         <Button
                             variant="secondary"
-                            onClick={loadProfile}
+                            onClick={() => setError(null)}
                         >
                             Try Again
                         </Button>

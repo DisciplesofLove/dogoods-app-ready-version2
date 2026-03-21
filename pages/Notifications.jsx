@@ -20,6 +20,16 @@ function Notifications() {
         }
     };
 
+    const markAllAsRead = async () => {
+        try {
+            const unread = notifications.filter(n => !n.read);
+            await Promise.all(unread.map(n => markAsRead(n.id)));
+        } catch (error) {
+            console.error('Error marking all as read:', error);
+            reportError(error);
+        }
+    };
+
     if (!isAuthenticated) {
         return null; // Will redirect in useEffect
     }

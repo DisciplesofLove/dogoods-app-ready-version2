@@ -2,7 +2,7 @@ import { reportError } from './helpers';
 
 // DeepSeek AI Configuration
 const DEEPSEEK_CONFIG = {
-    API_KEY: window.DEEPSEEK_API_KEY || 'sk-c28f285a0947483dacd0c0850dfg0',
+    API_KEY: window.DEEPSEEK_API_KEY || '',
     API_ENDPOINT: 'https://api.deepseek.com/v1',
     MODEL_VERSION: '1.0.0'
 };
@@ -45,11 +45,6 @@ class MatchingEngine {
             }
             
             console.log('✅ DeepSeek API key validated in MatchingEngine');
-            return true;
-            //     headers: this.deepseekConfig.headers
-            // });
-            // return response.ok;
-            
             return true;
         } catch (error) {
             reportError(error);

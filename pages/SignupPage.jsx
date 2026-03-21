@@ -1,13 +1,13 @@
 import React from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { useAuth } from "../utils/hooks/useSupabase";
+import { useAuthContext } from "../utils/AuthContext";
 import ErrorBoundary from "../components/common/ErrorBoundary";
 import Button from "../components/common/Button";
 import supabase from "../utils/supabaseClient";
 
 function SignupPageContent() {
     const navigate = useNavigate();
-    const { signUp, loading } = useAuth();
+    const { signUp, loading } = useAuthContext();
     const [formData, setFormData] = React.useState({
         name: '',
         email: '',

@@ -319,7 +319,11 @@ class DataService {
       };
 
       // Insert notification (if you have user_id, add it)
-      await supabase.from('notifications').insert(notif);
+      const { error: notifError } = await supabase.from('notifications').insert(notif);
+      if (notifError) {
+        console.error('Failed to insert notification:', notifError);
+        reportError(notifError);
+      }
 
       // Send email (stub, implement with email service if needed)
       if (approved) {
@@ -1160,7 +1164,11 @@ class DataService {
 
       if (error) throw error
 
-      await supabase.rpc('increment_likes_count', { post_id_arg: postId })
+      const { error: rpcError } = await supabase.rpc('increment_likes_count', { post_id_arg: postId })
+      if (rpcError) {
+        console.error('Failed to increment likes count:', rpcError)
+        reportError(rpcError)
+      }
 
       return data
     } catch (error) {
@@ -1180,7 +1188,11 @@ class DataService {
 
       if (error) throw error
 
-      await supabase.rpc('decrement_likes_count', { post_id_arg: postId })
+      const { error: rpcError } = await supabase.rpc('decrement_likes_count', { post_id_arg: postId })
+      if (rpcError) {
+        console.error('Failed to decrement likes count:', rpcError)
+        reportError(rpcError)
+      }
 
       return { success: true }
     } catch (error) {
@@ -1287,7 +1299,11 @@ class DataService {
       if (error) throw error
 
       // Update event registration count
-      await supabase.rpc('increment_registration_count', { event_id: eventId })
+      const { error: rpcError } = await supabase.rpc('increment_registration_count', { event_id: eventId })
+      if (rpcError) {
+        console.error('Failed to increment registration count:', rpcError)
+        reportError(rpcError)
+      }
 
       return { success: true }
     } catch (error) {

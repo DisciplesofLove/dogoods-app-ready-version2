@@ -59,7 +59,7 @@ function DietaryPreferences({
                 dietary_preferences: preferences
             });
         }
-    }, [dietaryRestrictions, allergies, preferences]);
+    }, [dietaryRestrictions, allergies, preferences, onChange]);
 
     const toggleItem = (category, value) => {
         if (readOnly) return;

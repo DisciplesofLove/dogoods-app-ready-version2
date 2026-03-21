@@ -86,7 +86,7 @@ class AuthService {
       }
 
       // Step 2: Listen for future auth changes
-      supabase.auth.onAuthStateChange(async (event, session) => {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'INITIAL_SESSION') {
           // Already handled above via getSession - skip
           return
@@ -108,6 +108,7 @@ class AuthService {
         }
       })
 
+      this._authSubscription = subscription
       this._initialized = true
     } catch (error) {
       console.error('Auth initialization error:', error)

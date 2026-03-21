@@ -38,16 +38,12 @@ function CommunityDetailPage() {
                 setCommunity(mergedCommunity);
 
                 // Fetch food listings for this community (both approved and active)
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000);
                 const { data: listings, error: listingsError } = await supabase
                     .from('food_listings')
                     .select('*')
                     .eq('community_id', id)
                     .in('status', ['approved', 'active'])
-                    .order('created_at', { ascending: false })
-                    .abortSignal(controller.signal);
-                clearTimeout(timeoutId);
+                    .order('created_at', { ascending: false });
 
                 if (listingsError) throw listingsError;
 

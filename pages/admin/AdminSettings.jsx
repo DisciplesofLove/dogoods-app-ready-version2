@@ -54,9 +54,8 @@ function AdminSettings() {
 
         const loadSettings = async () => {
             try {
-                // For now, use default settings since we don't have a settings table
-                // In a real app, you would fetch from Supabase settings table
-                setSettings(settings);
+                // TODO: Fetch from Supabase settings table when available
+                // For now, keep defaults already set in state
                 setMaintenanceMode(false);
             } catch (error) {
                 console.error('Load settings error:', error);

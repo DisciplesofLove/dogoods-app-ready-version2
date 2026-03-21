@@ -17,10 +17,14 @@ function ImpactStory() {
     const [newsletterSuccess, setNewsletterSuccess] = useState(false);
     const [newsletterError, setNewsletterError] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const newsletterTimerRef = React.useRef(null);
 
     useEffect(() => {
         loadContent();
         window.scrollTo(0, 0);
+        return () => {
+            if (newsletterTimerRef.current) clearTimeout(newsletterTimerRef.current);
+        };
     }, []);
 
     const loadContent = async () => {
@@ -95,7 +99,8 @@ function ImpactStory() {
             }
 
             setNewsletterSuccess(true);
-            setTimeout(() => setNewsletterSuccess(false), 5000);
+            if (newsletterTimerRef.current) clearTimeout(newsletterTimerRef.current);
+            newsletterTimerRef.current = setTimeout(() => setNewsletterSuccess(false), 5000);
             e.target.reset();
         } catch (error) {
             console.error('Error submitting newsletter:', error);
