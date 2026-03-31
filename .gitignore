@@ -103,6 +103,7 @@ jspm_packages/
 
 # Supabase
 .supabase/
+supabase/.temp/
 
 # Local development
 *.local 

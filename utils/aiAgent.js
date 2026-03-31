@@ -1,4 +1,4 @@
-import deepseekClient from './deepseekClient.js';
+import openaiClient from './openaiClient.js';
 import { getApiConfig } from './config.js';
 
 // Rate limiting system
@@ -75,7 +75,7 @@ async function chatWithNourish(message, context = '') {
     }
 
     try {
-        const systemPrompt = `You are Nourish, ShareFoods' AI assistant. You help users with food sharing, 
+        const systemPrompt = `You are Nouri, ShareFoods' AI assistant. You help users with food sharing, 
         provide cooking tips, and suggest ways to reduce food waste. Consider the following context:
         ${context}`;
     
@@ -408,8 +408,8 @@ function validateInput(value, type, fieldName) {
 // Update the invokeAIAgent function to use DeepSeek
 async function invokeAIAgent(systemPrompt, userPrompt, options = {}) {
     const {
-        retries = getApiConfig().DEEPSEEK.MAX_RETRIES,
-        timeout = getApiConfig().DEEPSEEK.TIMEOUT,
+        retries = getApiConfig().OPENAI.MAX_RETRIES,
+        timeout = getApiConfig().OPENAI.TIMEOUT,
         clientId = 'default',
         backoffMultiplier = 2
     } = options;
@@ -425,19 +425,19 @@ async function invokeAIAgent(systemPrompt, userPrompt, options = {}) {
                     { role: 'user', content: userPrompt }
                 ];
 
-                const response = await deepseekClient.chat(messages, {
+                const response = await openaiClient.chat(messages, {
                     temperature: 0.7,
                     max_tokens: 1000
                 });
 
-                // Handle the response properly - DeepSeek API returns content directly
+                // Handle the response properly - OpenAI API returns content in choices
                 let content;
                 if (response.choices && response.choices[0] && response.choices[0].message) {
                     content = response.choices[0].message.content;
                 } else if (typeof response === 'string') {
                     content = response;
                 } else {
-                    throw new Error('Unexpected response format from DeepSeek API');
+                    throw new Error('Unexpected response format from OpenAI API');
                 }
 
                 // Try to parse as JSON, if it fails, return as text
@@ -451,7 +451,7 @@ async function invokeAIAgent(systemPrompt, userPrompt, options = {}) {
                 }
             } catch (error) {
                 lastError = error;
-                console.error(`DeepSeek API error (attempt ${i + 1}/${retries}):`, error);
+                console.error(`OpenAI API error (attempt ${i + 1}/${retries}):`, error);
                 if (i < retries - 1) {
                     await new Promise(resolve => setTimeout(resolve, timeout * Math.pow(backoffMultiplier, i)));
                 }
@@ -576,7 +576,7 @@ function generateMockResponse(systemPrompt, userPrompt) {
         };
     } else {
         return {
-            message: "I'm Nourish, your food sharing assistant.",
+            message: "I'm Nouri, your food sharing assistant.",
             suggestions: [
                 "Ask about recipes",
                 "Get storage tips",

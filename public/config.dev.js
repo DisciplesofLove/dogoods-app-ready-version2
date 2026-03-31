@@ -1,10 +1,10 @@
 // Development configuration template
 // Copy this file to config.js and replace with your actual values
 window.__ENV__ = {
-    // DeepSeek Configuration
-    DEEPSEEK_API_KEY: '', // Set your DeepSeek API key here
-    DEEPSEEK_API_ENDPOINT: 'https://api.deepseek.com/v1',
-    DEEPSEEK_MODEL_VERSION: '1.0.0',
+    // OpenAI Configuration
+    OPENAI_API_KEY: '', // Set your OpenAI API key here
+    OPENAI_API_ENDPOINT: 'https://api.openai.com/v1',
+    OPENAI_CHAT_MODEL: 'gpt-4o-mini',
     
     // Mapbox Configuration
     VITE_MAPBOX_TOKEN: '', // Set your Mapbox token here

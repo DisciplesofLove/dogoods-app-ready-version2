@@ -1,17 +1,19 @@
 // Load environment variables from window.__ENV__ if available
 const ENV = (typeof window !== 'undefined' && window.__ENV__) || {};
 
+// Also check Vite env (loaded from .env.local)
+const VITE_ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {};
+
 // API Configuration
 const API_CONFIG = {
-    DEEPSEEK: {
-        API_KEY: ENV.DEEPSEEK_API_KEY || '',
-        API_ENDPOINT: ENV.DEEPSEEK_API_ENDPOINT || 'https://api.deepseek.com/v1',
-        MODEL_VERSION: ENV.DEEPSEEK_MODEL_VERSION || '1.0.0',
+    OPENAI: {
+        API_KEY: ENV.OPENAI_API_KEY || VITE_ENV.OPENAI_API_KEY || '',
+        API_ENDPOINT: ENV.OPENAI_API_ENDPOINT || 'https://api.openai.com/v1',
         TIMEOUT: parseInt(ENV.API_TIMEOUT) || 30000, // 30 seconds
         MAX_RETRIES: parseInt(ENV.API_MAX_RETRIES) || 3,
         MODELS: {
-            CHAT: 'deepseek-chat',
-            COMPLETION: 'deepseek-completion'
+            CHAT: ENV.OPENAI_CHAT_MODEL || 'gpt-4o-mini',
+            COMPLETION: ENV.OPENAI_COMPLETION_MODEL || 'gpt-4o-mini'
         }
     },
     MAPBOX: {
@@ -31,16 +33,16 @@ const API_CONFIG = {
 
 // Validate API configuration
 function validateApiConfig() {
-    const { DEEPSEEK } = API_CONFIG;
+    const { OPENAI } = API_CONFIG;
     
-    if (!DEEPSEEK.API_KEY || 
-        DEEPSEEK.API_KEY === 'your-deepseek-api-key-here' ||
-        !DEEPSEEK.API_KEY.startsWith('sk-')) {
-        console.warn('⚠️ DeepSeek API key not configured. Some AI features may be limited.');
+    if (!OPENAI.API_KEY || 
+        OPENAI.API_KEY === 'your-openai-api-key-here' ||
+        !OPENAI.API_KEY.startsWith('sk-')) {
+        console.warn('⚠️ OpenAI API key not configured. Some AI features may be limited.');
         return false;
     }
     
-    console.log('✅ DeepSeek API key configured:', DEEPSEEK.API_KEY.substring(0, 10) + '...');
+    console.log('✅ OpenAI API key configured:', OPENAI.API_KEY.substring(0, 10) + '...');
     return true;
 }
 

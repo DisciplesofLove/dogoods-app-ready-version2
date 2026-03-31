@@ -2,10 +2,10 @@
 // IMPORTANT: Replace placeholder values with your actual keys
 // Do NOT commit real API keys to version control
 window.__ENV__ = {
-    // DeepSeek Configuration
-    DEEPSEEK_API_KEY: '', // Set your DeepSeek API key here
-    DEEPSEEK_API_ENDPOINT: 'https://api.deepseek.com/v1',
-    DEEPSEEK_MODEL_VERSION: '1.0.0',
+    // OpenAI Configuration
+    OPENAI_API_KEY: '', // Set your OpenAI API key here or in .env.local
+    OPENAI_API_ENDPOINT: 'https://api.openai.com/v1',
+    OPENAI_CHAT_MODEL: 'gpt-4o-mini',
     
     // Mapbox Configuration
     VITE_MAPBOX_TOKEN: '', // Set your Mapbox token here

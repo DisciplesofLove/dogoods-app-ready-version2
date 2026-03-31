@@ -2324,6 +2324,179 @@ class DataService {
 
     return date.toISOString().split('T')[0]
   }
+
+  // ──────────────────────────────────────────────
+  // AI Conversations
+  // ──────────────────────────────────────────────
+
+  async getAIConversations(userId, limit = 50) {
+    try {
+      const { data, error } = await supabase
+        .from('ai_conversations')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true })
+        .limit(limit)
+
+      if (error) throw error
+      return data || []
+    } catch (error) {
+      console.error('Get AI conversations error:', error)
+      reportError(error)
+      throw error
+    }
+  }
+
+  async saveAIMessage(userId, role, message, metadata = {}) {
+    try {
+      const { data, error } = await supabase
+        .from('ai_conversations')
+        .insert({
+          user_id: userId,
+          role,
+          message,
+          metadata
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+      return data
+    } catch (error) {
+      console.error('Save AI message error:', error)
+      reportError(error)
+      throw error
+    }
+  }
+
+  async deleteAIConversations(userId) {
+    try {
+      const { error } = await supabase
+        .from('ai_conversations')
+        .delete()
+        .eq('user_id', userId)
+
+      if (error) throw error
+      return { success: true }
+    } catch (error) {
+      console.error('Delete AI conversations error:', error)
+      reportError(error)
+      throw error
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // AI Reminders
+  // ──────────────────────────────────────────────
+
+  async getAIReminders(userId) {
+    try {
+      const { data, error } = await supabase
+        .from('ai_reminders')
+        .select('*')
+        .eq('user_id', userId)
+        .order('trigger_time', { ascending: true })
+
+      if (error) throw error
+      return data || []
+    } catch (error) {
+      console.error('Get AI reminders error:', error)
+      reportError(error)
+      throw error
+    }
+  }
+
+  async createAIReminder(userId, message, triggerTime, reminderType = 'general', relatedId = null) {
+    try {
+      const insertData = {
+        user_id: userId,
+        message,
+        trigger_time: triggerTime,
+        reminder_type: reminderType
+      }
+      if (relatedId) {
+        insertData.related_id = relatedId
+      }
+
+      const { data, error } = await supabase
+        .from('ai_reminders')
+        .insert(insertData)
+        .select()
+        .single()
+
+      if (error) throw error
+      return data
+    } catch (error) {
+      console.error('Create AI reminder error:', error)
+      reportError(error)
+      throw error
+    }
+  }
+
+  async deleteAIReminder(reminderId) {
+    try {
+      const { error } = await supabase
+        .from('ai_reminders')
+        .delete()
+        .eq('id', reminderId)
+
+      if (error) throw error
+      return { success: true }
+    } catch (error) {
+      console.error('Delete AI reminder error:', error)
+      reportError(error)
+      throw error
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // AI Feedback
+  // ──────────────────────────────────────────────
+
+  async saveAIFeedback(conversationId, userId, rating, comment = null) {
+    try {
+      const { data, error } = await supabase
+        .from('ai_feedback')
+        .insert({
+          conversation_id: conversationId,
+          user_id: userId,
+          rating,
+          comment
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+      return data
+    } catch (error) {
+      console.error('Save AI feedback error:', error)
+      reportError(error)
+      throw error
+    }
+  }
+
+  async getAIFeedbackStats() {
+    try {
+      const { data, error } = await supabase
+        .from('ai_feedback')
+        .select('rating')
+
+      if (error) throw error
+
+      const stats = {
+        total: data?.length || 0,
+        helpful: data?.filter(f => f.rating === 'helpful').length || 0,
+        notHelpful: data?.filter(f => f.rating === 'not_helpful').length || 0
+      }
+      stats.helpfulRate = stats.total > 0 ? Math.round((stats.helpful / stats.total) * 100) : 0
+
+      return stats
+    } catch (error) {
+      console.error('Get AI feedback stats error:', error)
+      reportError(error)
+      throw error
+    }
+  }
 }
 
 // Create singleton instance

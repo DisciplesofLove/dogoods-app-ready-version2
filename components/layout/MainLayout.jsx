@@ -1,8 +1,7 @@
 import React from "react";
 import Header from "../common/Header";
 import Footer from "../common/Footer";
-// import AssistantButton from "../assistant/AssistantButton";
-// import AIAssistant from "../assistant/AIAssistant";
+import AIChatPanel from "../assistant/AIChatPanel";
 import UserChatWidget from "../common/UserChatWidget";
 import Tutorial from "../common/Tutorial";
 import { useTutorial } from "../../utils/TutorialContext";
@@ -45,15 +44,8 @@ function MainLayout({ children }) {
             </main>
             <Footer />
 
-            {/* AI Assistant Button and Modal */}
-            {/* <AssistantButton onClick={toggleAssistant} />
-            {isAssistantOpen && (
-                <AIAssistant
-                    key="ai-assistant"
-                    isOpen={isAssistantOpen}
-                    onClose={() => setIsAssistantOpen(false)}
-                />
-            )} */}
+            {/* Nouri AI Assistant */}
+            <AIChatPanel />
 
             {/* User Chat Widget (for messaging admin) */}
             <UserChatWidget />

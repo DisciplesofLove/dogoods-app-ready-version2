@@ -1,16 +1,16 @@
 import { getApiConfig } from './config.js';
 
 /**
- * Send a chat conversation to Deepseek LLM and get a response.
+ * Send a chat conversation to OpenAI and get a response.
  * @param {Array} messages - Array of {role: 'user'|'assistant'|'system', content: string}
  * @param {Object} options - Optional: { model, temperature, max_tokens, stream }
  * @returns {Promise<string>} - The assistant's reply
  */
 export async function deepseekChat(messages, options = {}) {
-    const config = getApiConfig().DEEPSEEK;
+    const config = getApiConfig().OPENAI;
     const endpoint = config.API_ENDPOINT + '/chat/completions';
     const apiKey = config.API_KEY;
-    const model = options.model || config.MODELS?.CHAT || 'deepseek-chat';
+    const model = options.model || config.MODELS?.CHAT || 'gpt-4o-mini';
     const temperature = options.temperature ?? 0.7;
     const max_tokens = options.max_tokens ?? 1000;
     const stream = options.stream ?? false;
@@ -35,7 +35,7 @@ export async function deepseekChat(messages, options = {}) {
 
         if (!res.ok) {
             const errorText = await res.text();
-            throw new Error(`Deepseek LLM error: ${res.status} ${errorText}`);
+            throw new Error(`OpenAI API error: ${res.status} ${errorText}`);
         }
 
         if (stream) {
@@ -45,13 +45,13 @@ export async function deepseekChat(messages, options = {}) {
         const data = await res.json();
         return data.choices?.[0]?.message?.content || '';
     } catch (error) {
-        console.error('Deepseek API error:', error);
+        console.error('OpenAI API error:', error);
         throw error;
     }
 }
 
 /**
- * Stream chat response from Deepseek LLM
+ * Stream chat response from OpenAI
  * @param {Array} messages - Array of message objects
  * @param {Function} onChunk - Callback for each chunk received
  * @param {Object} options - Optional configuration
@@ -94,7 +94,7 @@ export async function streamDeepseekChat(messages, onChunk, options = {}) {
 }
 
 /**
- * Test the Deepseek API connection
+ * Test the OpenAI API connection
  * @returns {Promise<boolean>}
  */
 export async function testDeepseekConnection() {
@@ -105,7 +105,7 @@ export async function testDeepseekConnection() {
         await deepseekChat(testMessage, { max_tokens: 10 });
         return true;
     } catch (error) {
-        console.error('Deepseek connection test failed:', error);
+        console.error('OpenAI connection test failed:', error);
         return false;
     }
 } 

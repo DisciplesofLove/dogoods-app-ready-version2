@@ -1,29 +1,29 @@
 import { reportError } from './helpers';
 
-// DeepSeek AI Configuration
-const DEEPSEEK_CONFIG = {
-    API_KEY: window.DEEPSEEK_API_KEY || '',
-    API_ENDPOINT: 'https://api.deepseek.com/v1',
-    MODEL_VERSION: '1.0.0'
+// OpenAI Configuration
+const OPENAI_CONFIG = {
+    API_KEY: window.OPENAI_API_KEY || '',
+    API_ENDPOINT: 'https://api.openai.com/v1',
+    MODEL: 'gpt-4o-mini'
 };
 
 // Load API key from environment if available
-if (typeof window !== 'undefined' && window.__ENV__ && window.__ENV__.DEEPSEEK_API_KEY) {
-    DEEPSEEK_CONFIG.API_KEY = window.__ENV__.DEEPSEEK_API_KEY;
+if (typeof window !== 'undefined' && window.__ENV__ && window.__ENV__.OPENAI_API_KEY) {
+    OPENAI_CONFIG.API_KEY = window.__ENV__.OPENAI_API_KEY;
 }
 
 class MatchingEngine {
     constructor(aiModel = null) {
-        this.aiModel = aiModel; // DeepSeek AI model instance
+        this.aiModel = aiModel; // OpenAI model instance
         this.matchHistory = new Map(); // Store match history
         this.trustScores = new Map(); // Store user trust scores
         this.valueEquivalencyMap = new Map(); // Store value equivalencies
         
-        // Initialize DeepSeek configuration
-        this.deepseekConfig = {
-            ...DEEPSEEK_CONFIG,
+        // Initialize OpenAI configuration
+        this.openaiConfig = {
+            ...OPENAI_CONFIG,
             headers: {
-                'Authorization': `Bearer ${DEEPSEEK_CONFIG.API_KEY}`,
+                'Authorization': `Bearer ${OPENAI_CONFIG.API_KEY}`,
                 'Content-Type': 'application/json'
             }
         };
@@ -33,28 +33,28 @@ class MatchingEngine {
     }
 
     /**
-     * Validate DeepSeek API key
+     * Validate OpenAI API key
      */
     validateApiKey() {
         try {
-            if (!DEEPSEEK_CONFIG.API_KEY || 
-                DEEPSEEK_CONFIG.API_KEY === 'your-deepseek-api-key-here' ||
-                !DEEPSEEK_CONFIG.API_KEY.startsWith('sk-')) {
-                console.warn('⚠️ Warning: DeepSeek API key not configured. Some AI features may be limited.');
+            if (!OPENAI_CONFIG.API_KEY || 
+                OPENAI_CONFIG.API_KEY === 'your-openai-api-key-here' ||
+                !OPENAI_CONFIG.API_KEY.startsWith('sk-')) {
+                console.warn('⚠️ Warning: OpenAI API key not configured. Some AI features may be limited.');
                 return false;
             }
             
-            console.log('✅ DeepSeek API key validated in MatchingEngine');
+            console.log('✅ OpenAI API key validated in MatchingEngine');
             return true;
         } catch (error) {
             reportError(error);
-            console.error('Failed to validate DeepSeek API key:', error.message);
+            console.error('Failed to validate OpenAI API key:', error.message);
             return false;
         }
     }
 
     /**
-     * Initialize DeepSeek AI client
+     * Initialize OpenAI client
      */
     async initializeAI() {
         try {
@@ -62,7 +62,6 @@ class MatchingEngine {
                 return null;
             }
 
-            // TODO: Replace with actual DeepSeek AI client initialization
             return {
                 classifyUrgency: async (description) => 'normal',
                 estimateValue: async (item) => item.userEstimatedValue || 5,
@@ -70,7 +69,7 @@ class MatchingEngine {
             };
         } catch (error) {
             reportError(error);
-            console.error('Failed to initialize DeepSeek AI:', error.message);
+            console.error('Failed to initialize OpenAI:', error.message);
             return null;
         }
     }
@@ -139,22 +138,29 @@ class MatchingEngine {
                     if (this.aiModel.classifyUrgency) {
                         request.urgency = await this.aiModel.classifyUrgency(request.description);
                     } else {
-                        const response = await fetch(`${DEEPSEEK_CONFIG.API_ENDPOINT}/classify-urgency`, {
+                        const response = await fetch(`${OPENAI_CONFIG.API_ENDPOINT}/chat/completions`, {
                             method: 'POST',
-                            headers: this.deepseekConfig.headers,
+                            headers: this.openaiConfig.headers,
                             body: JSON.stringify({
-                                description: request.description,
-                                model: DEEPSEEK_CONFIG.MODEL_VERSION
+                                model: OPENAI_CONFIG.MODEL,
+                                messages: [
+                                    { role: 'system', content: 'Classify the urgency of this food request as: critical, high, normal, or optional. Respond with just the urgency level.' },
+                                    { role: 'user', content: request.description }
+                                ],
+                                max_tokens: 10
                             })
                         });
                         
                         if (response.ok) {
                             const result = await response.json();
-                            request.urgency = result.urgency;
+                            const urgency = result.choices?.[0]?.message?.content?.trim()?.toLowerCase();
+                            if (['critical', 'high', 'normal', 'optional'].includes(urgency)) {
+                                request.urgency = urgency;
+                            }
                         }
                     }
                 } catch (error) {
-                    console.warn('Failed to classify urgency using DeepSeek AI:', error.message);
+                    console.warn('Failed to classify urgency using OpenAI:', error.message);
                     request.urgency = 'normal'; // Fallback to normal urgency
                 }
             }

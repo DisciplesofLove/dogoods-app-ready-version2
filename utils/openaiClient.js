@@ -2,130 +2,99 @@ import { getApiConfig } from './config.js';
 
 /**
  * OpenAI API Client
- * Handles communication with OpenAI's API
+ * Handles communication with OpenAI's API with retry and timeout support
  */
 class OpenAIClient {
     constructor() {
-        this.config = getApiConfig().OPENAI;
+        // Don't cache config values - get them fresh each time
     }
 
-    async _makeRequest(endpoint, options = {}) {
-        const url = `${this.config.API_ENDPOINT}${endpoint}`;
-        
-        const requestOptions = {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${this.config.API_KEY}`,
-                'Content-Type': 'application/json',
-                ...options.headers
-            },
-            body: JSON.stringify(options.body),
-            ...options
-        };
-
-        try {
-            const response = await fetch(url, requestOptions);
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`OpenAI API request failed: ${response.status} ${errorText}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('OpenAI API Error:', error);
-            throw new Error(`API request failed: ${error.message}`);
-        }
+    _getConfig() {
+        const config = getApiConfig().OPENAI;
+        return config;
     }
 
-    /**
-     * Send a chat completion request
-     * @param {Array} messages - Array of message objects
-     * @param {Object} options - Optional configuration
-     * @returns {Promise<string>} The assistant's response
-     */
     async chat(messages, options = {}) {
+        const config = this._getConfig();
         const {
-            model = this.config.MODELS.CHAT,
+            model = config.MODELS.CHAT,
             temperature = 0.7,
             max_tokens = 1000,
-            top_p = 1,
-            frequency_penalty = 0,
-            presence_penalty = 0
+            stream = false
         } = options;
 
-        const requestBody = {
+        return this._makeRequest('/chat/completions', {
             model,
             messages,
             temperature,
             max_tokens,
-            top_p,
-            frequency_penalty,
-            presence_penalty
+            stream
+        });
+    }
+
+    async _makeRequest(endpoint, data) {
+        const config = this._getConfig();
+        const headers = {
+            'Authorization': `Bearer ${config.API_KEY}`,
+            'Content-Type': 'application/json'
         };
 
-        try {
-            const response = await this._makeRequest('/chat/completions', {
-                body: requestBody
-            });
+        for (let attempt = 0; attempt <= config.MAX_RETRIES; attempt++) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), config.TIMEOUT);
 
-            return response.choices?.[0]?.message?.content || '';
-        } catch (error) {
-            console.error('OpenAI Chat Error:', error);
-            throw error;
+                const response = await fetch(`${config.API_ENDPOINT}${endpoint}`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(data),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    let errorDetails;
+                    try {
+                        errorDetails = await response.json();
+                    } catch (parseError) {
+                        errorDetails = await response.text();
+                    }
+                    
+                    console.error('OpenAI API Error:', {
+                        status: response.status,
+                        statusText: response.statusText,
+                        error: errorDetails,
+                        endpoint: `${config.API_ENDPOINT}${endpoint}`
+                    });
+                    
+                    throw new Error(errorDetails.error?.message || errorDetails.message || errorDetails || `API request failed: ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    throw new Error('Request timed out');
+                }
+                if (attempt === config.MAX_RETRIES) {
+                    throw error;
+                }
+                // Exponential backoff with jitter
+                const backoffTime = Math.pow(2, attempt) * 1000;
+                const jitter = Math.random() * 1000;
+                await new Promise(resolve => setTimeout(resolve, backoffTime + jitter));
+            }
         }
     }
 
-    /**
-     * Send a completion request (for older models)
-     * @param {string} prompt - The prompt text
-     * @param {Object} options - Optional configuration
-     * @returns {Promise<string>} The completion response
-     */
-    async completion(prompt, options = {}) {
-        const {
-            model = this.config.MODELS.COMPLETION,
-            temperature = 0.7,
-            max_tokens = 1000,
-            top_p = 1,
-            frequency_penalty = 0,
-            presence_penalty = 0
-        } = options;
-
-        const requestBody = {
-            model,
-            prompt,
-            temperature,
-            max_tokens,
-            top_p,
-            frequency_penalty,
-            presence_penalty
-        };
-
-        try {
-            const response = await this._makeRequest('/completions', {
-                body: requestBody
-            });
-
-            return response.choices?.[0]?.text || '';
-        } catch (error) {
-            console.error('OpenAI Completion Error:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Test the connection to OpenAI API
-     * @returns {Promise<boolean>} True if connection is successful
-     */
     async testConnection() {
         try {
             const testMessages = [
-                { role: 'user', content: 'Hello, can you respond with just "OK"?' }
+                { role: 'user', content: 'Hello, respond with just "OK".' }
             ];
-
             const response = await this.chat(testMessages, { max_tokens: 10 });
-            return response.toLowerCase().includes('ok');
+            const content = response.choices?.[0]?.message?.content || '';
+            return content.toLowerCase().includes('ok');
         } catch (error) {
             console.error('OpenAI connection test failed:', error);
             return false;
