@@ -6,7 +6,17 @@
   VITE_SUPABASE_URL = "https://ifzbpqyuhnxbhdcnmvfs.supabase.co"
   VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmemJwcXl1aG54YmhkY25tdmZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYwNTI5NTgsImV4cCI6MjA3MTYyODk1OH0.ivjNXt8z704sVv6Jt2Z3tVkkelUzeb8Ih4SaCQFHerk"
 
-# SPA fallback - must come before other rules
+[functions]
+  directory = "netlify/functions"
+
+# Proxy /api/openai/* to the serverless function (must come BEFORE SPA catch-all)
+[[redirects]]
+  from = "/api/openai/*"
+  to = "/.netlify/functions/openai-proxy/:splat"
+  status = 200
+  force = true
+
+# SPA fallback
 [[redirects]]
   from = "/*"
   to = "/index.html"
