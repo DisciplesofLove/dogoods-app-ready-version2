@@ -12,7 +12,7 @@
 # Proxy /api/openai/* to the serverless function (must come BEFORE SPA catch-all)
 [[redirects]]
   from = "/api/openai/*"
-  to = "/.netlify/functions/openai-proxy/:splat"
+  to = "/.netlify/functions/openai-proxy"
   status = 200
   force = true
 

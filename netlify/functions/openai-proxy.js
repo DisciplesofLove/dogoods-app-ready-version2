@@ -27,7 +27,15 @@ const handler = async (event) => {
   }
 
   // Extract OpenAI API path from the original request URL
-  const openaiPath = event.path.replace(/^\/?api\/openai/, '');
+  // event.rawUrl has the original URL; event.path may be rewritten by Netlify redirects
+  let openaiPath = '/v1/chat/completions'; // fallback
+  try {
+    const originalUrl = new URL(event.rawUrl);
+    openaiPath = originalUrl.pathname.replace(/^\/api\/openai/, '') || '/v1/chat/completions';
+  } catch {
+    // fallback: try event.path
+    openaiPath = event.path.replace(/^\/?(\.netlify\/functions\/openai-proxy|api\/openai)/, '') || '/v1/chat/completions';
+  }
   const openaiUrl = `https://api.openai.com${openaiPath}`;
 
   const requestHeaders = {

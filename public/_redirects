@@ -1,1 +1,2 @@
+/api/openai/*  /.netlify/functions/openai-proxy  200!
 /*    /index.html   200
