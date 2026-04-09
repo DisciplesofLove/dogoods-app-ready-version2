@@ -26,6 +26,30 @@ export default defineConfig(({ mode }) => {
           target: 'http://localhost:8000',
           changeOrigin: true,
         },
+        '/api/chat': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
+        '/api/match': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
+        '/api/recipes': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
+        '/api/storage-tips': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
+        '/api/impact': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
+        '/api/food-pairings': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
       },
     },
     resolve: {

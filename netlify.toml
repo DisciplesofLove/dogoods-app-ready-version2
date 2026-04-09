@@ -5,22 +5,82 @@
 [build.environment]
   VITE_SUPABASE_URL = "https://ifzbpqyuhnxbhdcnmvfs.supabase.co"
   VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmemJwcXl1aG54YmhkY25tdmZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYwNTI5NTgsImV4cCI6MjA3MTYyODk1OH0.ivjNXt8z704sVv6Jt2Z3tVkkelUzeb8Ih4SaCQFHerk"
+  NODE_VERSION = "18"
 
 [functions]
   directory = "netlify/functions"
+  node_bundler = "esbuild"
 
-# Proxy /api/openai/* to the serverless function (must come BEFORE SPA catch-all)
+[functions."openai-proxy"]
+  # Generous timeout for Whisper transcription (large audio files)
+  external_node_modules = ["node-fetch"]
+
+# ─── API Proxies ───────────────────────────────────────────────────────────
+# Backend AI API → deployed backend server (set BACKEND_URL in Netlify env vars)
+# In production, these redirect to the Railway/Render backend
+# Locally, Vite proxy handles these (see vite.config.js)
+
+# OpenAI direct proxy (Whisper/TTS fallback when backend is down)
 [[redirects]]
   from = "/api/openai/*"
   to = "/.netlify/functions/openai-proxy"
   status = 200
   force = true
 
-# SPA fallback
+# Backend AI API proxy — set BACKEND_URL env var on Netlify dashboard
+# Example: BACKEND_URL=https://dogoods-api.railway.app
+[[redirects]]
+  from = "/api/ai/*"
+  to = "${BACKEND_URL}/api/ai/:splat"
+  status = 200
+  force = true
+  [redirects.headers]
+    X-Forwarded-Host = "dogoods.app"
+
+# Legacy AI endpoints
+[[redirects]]
+  from = "/api/chat"
+  to = "${BACKEND_URL}/api/chat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/match"
+  to = "${BACKEND_URL}/api/match"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/recipes"
+  to = "${BACKEND_URL}/api/recipes"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/storage-tips"
+  to = "${BACKEND_URL}/api/storage-tips"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/impact"
+  to = "${BACKEND_URL}/api/impact"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/food-pairings"
+  to = "${BACKEND_URL}/api/food-pairings"
+  status = 200
+  force = true
+
+# SPA fallback (must be LAST redirect)
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+# ─── Security Headers ─────────────────────────────────────────────────────
 
 [[headers]]
   for = "/favicon.*"
@@ -31,3 +91,6 @@
   for = "/*"
   [headers.values]
     X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"

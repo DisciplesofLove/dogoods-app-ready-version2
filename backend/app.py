@@ -19,6 +19,7 @@ Run:
 import asyncio
 import os
 import re
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -27,6 +28,7 @@ from base64 import b64encode
 import httpx
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from backend.ai_engine import (
@@ -39,10 +41,13 @@ from backend.ai_engine import (
     _circuit,
     supabase_get,
     supabase_post,
+    close_clients,
     SUPABASE_URL,
     SUPABASE_SERVICE_KEY,
     LEGACY_API_KEY,
     DEFAULT_MODEL,
+    CHAT_API_KEY,
+    OPENAI_API_KEY,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -50,7 +55,7 @@ logger = logging.getLogger("app")
 
 ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv(
-        "CORS_ORIGINS", "http://localhost:3001,http://127.0.0.1:3001"
+        "CORS_ORIGINS", "http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002"
     ).split(",")
 ]
 
@@ -237,12 +242,13 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(_reminder_loop())
     logger.info("Background reminder job scheduled")
     yield
-    # Shutdown: cancel background task
+    # Shutdown: cancel background task, close pooled clients
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         logger.info("Background reminder job stopped")
+    await close_clients()
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +357,72 @@ class ImpactRequest(BaseModel):
     food_type: str = Field(min_length=2, max_length=100)
     quantity: float = Field(gt=0, le=1_000_000)
     unit: str = Field(min_length=1, max_length=20)
+
+
+# New models for expanded features
+
+class NutritionRequest(BaseModel):
+    food_items: list[str] = Field(min_length=1, max_length=20)
+
+    @field_validator("food_items", mode="before")
+    @classmethod
+    def validate_food_items(cls, v: list[str]) -> list[str]:
+        return [item.strip() for item in v if item.strip() and len(item.strip()) <= 100][:20]
+
+
+class MealPlanRequest(BaseModel):
+    ingredients: list[str] = Field(min_length=1, max_length=30)
+    servings: int = Field(default=2, ge=1, le=20)
+    dietary: str = Field(default="none", max_length=50)
+
+    @field_validator("ingredients", mode="before")
+    @classmethod
+    def validate_ingredients_mp(cls, v: list[str]) -> list[str]:
+        return [item.strip() for item in v if item.strip() and len(item.strip()) <= 100][:30]
+
+
+class DonationTipsRequest(BaseModel):
+    food_type: str = Field(min_length=2, max_length=100)
+    quantity: str = Field(default="some", max_length=100)
+
+
+class AnalyzeFoodImageRequest(BaseModel):
+    image_base64: str = Field(min_length=100)
+
+    @field_validator("image_base64", mode="before")
+    @classmethod
+    def validate_image_size(cls, v: str) -> str:
+        # ~10 MB base64 limit
+        if len(v) > 14_000_000:
+            raise ValueError("Image too large (max ~10 MB)")
+        return v
+
+
+class VerifyListingRequest(BaseModel):
+    title: str = Field(min_length=2, max_length=200)
+    description: str = Field(min_length=2, max_length=2000)
+    category: str = Field(default="", max_length=50)
+    expiry: str = Field(default="", max_length=100)
+    ingredients: str = Field(default="", max_length=1000)
+    image_url: str = Field(default="", max_length=500)
+    allergens: list[str] = Field(default_factory=list)
+
+
+class AdvancedMatchRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    food_request: str = Field(min_length=2, max_length=500)
+    location: dict | None = None
+    radius_km: float = Field(default=10.0, ge=0.5, le=100.0)
+    dietary: list[str] = Field(default_factory=list)
+    max_results: int = Field(default=10, ge=1, le=50)
+
+
+class MatchOutcomeRequest(BaseModel):
+    match_id: str = Field(min_length=1, max_length=128)
+    user_id: str = Field(min_length=1, max_length=128)
+    listing_id: str = Field(min_length=1, max_length=128)
+    score: float = Field(ge=0.0, le=100.0)
+    outcome: str = Field(max_length=50)
 
 
 # ===================================================================
@@ -657,6 +729,339 @@ async def ai_transcribe(
 
 
 # ===================================================================
+#  STREAMING CHAT ENDPOINT (SSE)
+# ===================================================================
+
+@app.post("/api/ai/chat/stream")
+async def ai_chat_stream(body: AIChatRequest, request: Request):
+    """
+    Server-Sent Events streaming chat endpoint.
+    Performs tool calling first, then streams the final response.
+
+    Event types:
+      - {"type": "meta", "lang": "en", "user_id": "..."}
+      - {"type": "tool", "name": "search_food_near_user", "status": "calling"|"done"}
+      - {"type": "text", "content": "chunk of response text"}
+      - [DONE]
+    """
+    _enforce_rate_limit(request)
+
+    async def event_generator():
+        try:
+            async for chunk in conversation_engine.chat_stream(
+                user_id=body.user_id,
+                message=body.message,
+            ):
+                yield chunk
+        except Exception as exc:
+            logger.error("Stream error: %s", exc)
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Internal error'})}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ===================================================================
+#  REMINDER MANAGEMENT ENDPOINTS
+# ===================================================================
+
+@app.get("/api/ai/reminders/{user_id}")
+async def ai_get_reminders(
+    user_id: str,
+    request: Request,
+    include_sent: bool = False,
+    days_ahead: int = 30,
+) -> dict:
+    """Get user's reminders from ai_reminders table."""
+    _enforce_rate_limit(request)
+    if not user_id or len(user_id) > 128:
+        raise HTTPException(400, "Invalid user_id")
+
+    try:
+        from backend.tools import _check_pickup_schedule
+        result = await _check_pickup_schedule(
+            user_id=user_id,
+            include_sent=include_sent,
+            days_ahead=days_ahead,
+        )
+        return result
+    except Exception as exc:
+        logger.error("Get reminders error: %s", exc)
+        raise HTTPException(500, "Failed to retrieve reminders") from exc
+
+
+@app.delete("/api/ai/reminders/{reminder_id}")
+async def ai_delete_reminder(reminder_id: str, request: Request) -> dict:
+    """Cancel/delete a specific reminder."""
+    _enforce_rate_limit(request)
+    if not reminder_id or len(reminder_id) > 128:
+        raise HTTPException(400, "Invalid reminder_id")
+
+    try:
+        await supabase_post(
+            f"ai_reminders?id=eq.{reminder_id}",
+            None,
+            method="DELETE",
+        )
+        return {"deleted": True, "reminder_id": reminder_id}
+    except Exception as exc:
+        logger.error("Delete reminder error: %s", exc)
+        raise HTTPException(500, "Failed to delete reminder") from exc
+
+
+# ===================================================================
+#  AI FEATURE ENDPOINTS
+# ===================================================================
+
+@app.post("/api/ai/nutrition")
+async def ai_nutrition(body: NutritionRequest, request: Request) -> dict:
+    """AI-powered nutrition analysis for food items."""
+    _enforce_rate_limit(request)
+    try:
+        result = await conversation_engine.get_nutrition_analysis(body.food_items)
+        return result
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Nutrition analysis error: %s", exc)
+        raise HTTPException(500, "Nutrition analysis failed") from exc
+
+
+@app.post("/api/ai/meal-plan")
+async def ai_meal_plan(body: MealPlanRequest, request: Request) -> dict:
+    """Generate a full meal plan from available ingredients."""
+    _enforce_rate_limit(request)
+    try:
+        result = await conversation_engine.get_meal_plan(
+            ingredients=body.ingredients,
+            servings=body.servings,
+            dietary=body.dietary,
+        )
+        return result
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Meal plan error: %s", exc)
+        raise HTTPException(500, "Meal plan generation failed") from exc
+
+
+@app.post("/api/ai/donation-tips")
+async def ai_donation_tips(body: DonationTipsRequest, request: Request) -> dict:
+    """AI-powered donation best practices and safety guidelines."""
+    _enforce_rate_limit(request)
+    try:
+        result = await conversation_engine.get_donation_tips(
+            food_type=body.food_type,
+            quantity=body.quantity,
+        )
+        return result
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Donation tips error: %s", exc)
+        raise HTTPException(500, "Donation tips generation failed") from exc
+
+
+@app.get("/api/ai/community-insights")
+async def ai_community_insights(request: Request) -> dict:
+    """AI-generated community-level insights and analytics."""
+    _enforce_rate_limit(request)
+    try:
+        result = await conversation_engine.get_community_insights()
+        return result
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Community insights error: %s", exc)
+        raise HTTPException(500, "Community insights generation failed") from exc
+
+
+@app.get("/api/ai/suggestions/{user_id}")
+async def ai_suggestions(user_id: str, request: Request) -> dict:
+    """Personalized AI suggestions based on user activity."""
+    _enforce_rate_limit(request)
+    if not user_id or len(user_id) > 128:
+        raise HTTPException(400, "Invalid user_id")
+    try:
+        result = await conversation_engine.get_smart_suggestions(user_id)
+        return result
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Smart suggestions error: %s", exc)
+        raise HTTPException(500, "Suggestions generation failed") from exc
+
+
+@app.get("/api/ai/stats")
+async def ai_stats(request: Request) -> dict:
+    """Platform-wide AI usage statistics (admin-oriented)."""
+    _enforce_rate_limit(request)
+
+    stats = {
+        "circuit_state": _circuit.state.value,
+        "ai_configured": bool(CHAT_API_KEY),
+        "voice_available": bool(OPENAI_API_KEY),
+    }
+
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            convos = await supabase_get("ai_conversations", {"select": "id", "limit": "1000"})
+            stats["total_conversations"] = len(convos)
+        except Exception:
+            stats["total_conversations"] = None
+
+        try:
+            feedback = await supabase_get("ai_feedback", {"select": "id,rating", "limit": "1000"})
+            stats["total_feedback"] = len(feedback)
+            stats["helpful_count"] = len([f for f in feedback if f.get("rating") == "helpful"])
+            stats["not_helpful_count"] = len([f for f in feedback if f.get("rating") == "not_helpful"])
+        except Exception:
+            stats["total_feedback"] = None
+
+        try:
+            reminders = await supabase_get("ai_reminders", {"select": "id,sent", "limit": "1000"})
+            stats["total_reminders"] = len(reminders)
+            stats["sent_reminders"] = len([r for r in reminders if r.get("sent")])
+        except Exception:
+            stats["total_reminders"] = None
+
+    return stats
+
+
+# ===================================================================
+#  VISION / SAFETY / MATCHING / ANALYTICS
+# ===================================================================
+
+@app.post("/api/ai/analyze-food-image")
+async def analyze_food_image(body: AnalyzeFoodImageRequest, request: Request) -> dict:
+    """Analyze a food photo using GPT-4o vision."""
+    _enforce_rate_limit(request)
+    try:
+        result = await conversation_engine.analyze_food_image(body.image_base64)
+        return result
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Food image analysis error: %s", exc)
+        raise HTTPException(500, "Image analysis failed") from exc
+
+
+@app.post("/api/ai/verify-listing")
+async def verify_listing(body: VerifyListingRequest, request: Request) -> dict:
+    """AI safety verification for a food listing."""
+    _enforce_rate_limit(request)
+    try:
+        result = await conversation_engine.verify_food_safety(
+            title=body.title,
+            description=body.description,
+            category=body.category,
+            expiry=body.expiry,
+            ingredients=body.ingredients,
+            image_url=body.image_url,
+            allergens=body.allergens,
+        )
+        return result
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Listing verification error: %s", exc)
+        raise HTTPException(500, "Verification failed") from exc
+
+
+@app.post("/api/ai/match-advanced")
+async def match_advanced(body: AdvancedMatchRequest, request: Request) -> dict:
+    """AI-enhanced food matching with re-ranking."""
+    _enforce_rate_limit(request)
+    try:
+        result = await conversation_engine.advanced_match(
+            user_id=body.user_id,
+            food_request=body.food_request,
+            location=body.location,
+            radius_km=body.radius_km,
+            dietary=body.dietary,
+            max_results=body.max_results,
+        )
+        return result
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Advanced matching error: %s", exc)
+        raise HTTPException(500, "Matching failed") from exc
+
+
+@app.post("/api/ai/match-outcome")
+async def match_outcome(body: MatchOutcomeRequest, request: Request) -> dict:
+    """Record outcome of a food match for learning."""
+    _enforce_rate_limit(request)
+    try:
+        result = await conversation_engine.record_match_outcome(
+            match_id=body.match_id,
+            user_id=body.user_id,
+            listing_id=body.listing_id,
+            score=body.score,
+            outcome=body.outcome,
+        )
+        return result
+    except Exception as exc:
+        logger.error("Match outcome error: %s", exc)
+        raise HTTPException(500, "Failed to record outcome") from exc
+
+
+@app.get("/api/ai/analytics/community")
+async def analytics_community(request: Request) -> dict:
+    """Community-level analytics."""
+    _enforce_rate_limit(request)
+    try:
+        return await conversation_engine.get_analytics_community()
+    except Exception as exc:
+        logger.error("Community analytics error: %s", exc)
+        raise HTTPException(500, "Analytics failed") from exc
+
+
+@app.get("/api/ai/analytics/user/{user_id}")
+async def analytics_user(user_id: str, request: Request) -> dict:
+    """Per-user activity analytics."""
+    _enforce_rate_limit(request)
+    if not user_id or len(user_id) > 128:
+        raise HTTPException(400, "Invalid user_id")
+    try:
+        return await conversation_engine.get_analytics_user(user_id)
+    except Exception as exc:
+        logger.error("User analytics error: %s", exc)
+        raise HTTPException(500, "Analytics failed") from exc
+
+
+@app.get("/api/ai/analytics/food-waste")
+async def analytics_food_waste(request: Request) -> dict:
+    """Food waste reduction analytics."""
+    _enforce_rate_limit(request)
+    try:
+        return await conversation_engine.get_analytics_food_waste()
+    except Exception as exc:
+        logger.error("Waste analytics error: %s", exc)
+        raise HTTPException(500, "Analytics failed") from exc
+
+
+@app.get("/api/ai/analytics/matching")
+async def analytics_matching(request: Request) -> dict:
+    """Matching system analytics."""
+    _enforce_rate_limit(request)
+    try:
+        return await conversation_engine.get_analytics_matching()
+    except Exception as exc:
+        logger.error("Matching analytics error: %s", exc)
+        raise HTTPException(500, "Analytics failed") from exc
+
+
+# ===================================================================
 #  LEGACY ROUTES (preserved from original ai_engine.py)
 # ===================================================================
 
@@ -664,8 +1069,20 @@ async def ai_transcribe(
 async def health() -> dict:
     return {
         "status": "ok",
-        "ai_configured": bool(LEGACY_API_KEY),
-        "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "ai_configured": bool(CHAT_API_KEY),
+        "openai_configured": bool(OPENAI_API_KEY),
+        "circuit_state": _circuit.state.value,
+    }
+
+
+@app.get("/api/ai/health")
+async def ai_health() -> dict:
+    """Health check for frontend — proxied from /api/ai/health."""
+    return {
+        "status": "ok",
+        "ai_configured": bool(CHAT_API_KEY),
+        "openai_configured": bool(OPENAI_API_KEY),
+        "voice_available": bool(OPENAI_API_KEY),
         "circuit_state": _circuit.state.value,
     }
 

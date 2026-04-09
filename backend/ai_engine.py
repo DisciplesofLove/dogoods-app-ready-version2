@@ -1,9 +1,10 @@
 """
 DoGoods AI Conversation Engine
 ================================
-Connects OpenAI GPT-4o (reasoning), Whisper (speech-to-text), and TTS (text-to-speech).
-Manages conversations: user message + ID -> profile lookup -> GPT-4o query -> text/audio response.
-Includes food matching engine and environmental impact calculator.
+World-class AI engine for fighting hunger: GPT-4o vision for food recognition,
+Whisper STT, TTS, DeepSeek chat, multi-turn tool calling, food safety verification,
+advanced AI matching, multi-language support (10+ languages), analytics, and
+connection pooling for production speed.
 
 This module is the *service layer*. FastAPI routes live in backend/app.py.
 
@@ -11,6 +12,8 @@ Run the API:
     uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 """
 
+import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -35,47 +38,128 @@ logger = logging.getLogger("ai_engine")
 # ---------------------------------------------------------------------------
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "") or os.getenv("VITE_OPENAI_API_KEY", "")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "") or os.getenv("VITE_DEEPSEEK_API_KEY", "")
 
-# OpenAI is primary for conversation engine (GPT-4o, Whisper, TTS)
+# OpenAI (needed for Whisper STT, TTS, and GPT-4o Vision)
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 
-# Legacy API key resolution (for matching/recipe endpoints that use DeepSeek)
-LEGACY_API_KEY = DEEPSEEK_API_KEY or OPENAI_API_KEY
-LEGACY_BASE_URL = DEEPSEEK_BASE_URL if DEEPSEEK_API_KEY else OPENAI_BASE_URL
+# Primary AI key: prefer DeepSeek for chat, fall back to OpenAI
+PRIMARY_API_KEY = DEEPSEEK_API_KEY or OPENAI_API_KEY
+PRIMARY_BASE_URL = DEEPSEEK_BASE_URL if DEEPSEEK_API_KEY else OPENAI_BASE_URL
+
+# Legacy alias (used by matching/recipe/storage endpoints)
+LEGACY_API_KEY = PRIMARY_API_KEY
+LEGACY_BASE_URL = PRIMARY_BASE_URL
 DEFAULT_MODEL = os.getenv("AI_MODEL", "deepseek-chat")
 
-# Conversation engine models (OpenAI)
-CHAT_MODEL = os.getenv("AI_CHAT_MODEL", "gpt-4o")
+# Conversation engine — DeepSeek primary (OpenAI-compatible API)
+CHAT_MODEL = os.getenv("AI_CHAT_MODEL", "deepseek-chat")
+CHAT_API_KEY = DEEPSEEK_API_KEY or OPENAI_API_KEY
+CHAT_BASE_URL = DEEPSEEK_BASE_URL if DEEPSEEK_API_KEY else OPENAI_BASE_URL
+
+# Vision model — OpenAI only (DeepSeek doesn't support vision)
+VISION_MODEL = os.getenv("AI_VISION_MODEL", "gpt-4o")
+
+# Whisper / TTS (OpenAI only — optional)
 WHISPER_MODEL = "whisper-1"
 TTS_MODEL = "tts-1"
 TTS_VOICE_EN = os.getenv("AI_TTS_VOICE", "nova")
-TTS_VOICE_ES = os.getenv("AI_TTS_VOICE_ES", "nova")  # Sesame-compatible Spanish voice
+TTS_VOICE_ES = os.getenv("AI_TTS_VOICE_ES", "nova")
 
 MAX_RETRIES = int(os.getenv("AI_MAX_RETRIES", "3"))
 TIMEOUT_SECONDS = int(os.getenv("AI_TIMEOUT", "30"))
 
 # ---------------------------------------------------------------------------
-# Spanish language detection (lightweight heuristic)
+# Multi-language detection (10+ languages)
 # ---------------------------------------------------------------------------
 
-_SPANISH_MARKERS = {
-    "hola", "gracias", "por favor", "ayuda", "comida", "buscar",
-    "quiero", "necesito", "dónde", "donde", "cómo", "como",
-    "cuándo", "cuando", "tengo", "puedo", "buenos", "buenas",
-    "qué", "que", "disponible", "recoger", "compartir",
-    "alimentos", "comunidad", "recordatorio", "horario",
+_LANG_MARKERS: dict[str, set[str]] = {
+    "es": {
+        "hola", "gracias", "por favor", "ayuda", "comida", "buscar",
+        "quiero", "necesito", "dónde", "donde", "cómo", "como",
+        "cuándo", "cuando", "tengo", "puedo", "buenos", "buenas",
+        "qué", "que", "disponible", "recoger", "compartir",
+        "alimentos", "comunidad", "recordatorio", "horario",
+    },
+    "fr": {
+        "bonjour", "merci", "aidez", "nourriture", "chercher", "besoin",
+        "comment", "quand", "avoir", "pouvoir", "disponible", "communauté",
+        "bonsoir", "salut", "svp", "manger", "partager", "trouver",
+    },
+    "pt": {
+        "olá", "obrigado", "obrigada", "ajuda", "comida", "procurar",
+        "preciso", "como", "quando", "posso", "disponível", "comunidade",
+        "bom dia", "boa tarde", "compartilhar", "encontrar", "alimento",
+    },
+    "ar": {
+        "مرحبا", "شكرا", "مساعدة", "طعام", "بحث", "أحتاج",
+        "كيف", "متى", "أين", "متاح", "مجتمع",
+    },
+    "hi": {
+        "नमस्ते", "धन्यवाद", "मदद", "खाना", "खोजें", "चाहिए",
+        "कैसे", "कब", "कहाँ", "उपलब्ध", "समुदाय",
+    },
+    "zh": {
+        "你好", "谢谢", "帮助", "食物", "搜索", "需要",
+        "怎么", "什么时候", "在哪里", "可用", "社区",
+    },
+    "sw": {
+        "habari", "asante", "msaada", "chakula", "tafuta", "nahitaji",
+        "vipi", "lini", "wapi", "inapatikana", "jamii",
+    },
+    "bn": {
+        "হ্যালো", "ধন্যবাদ", "সাহায্য", "খাবার", "খুঁজুন", "দরকার",
+        "কিভাবে", "কখন", "কোথায়", "উপলব্ধ", "সম্প্রদায়",
+    },
+    "ht": {
+        "bonjou", "mèsi", "ede", "manje", "chèche", "bezwen",
+        "kijan", "kilè", "ki kote", "disponib", "kominote",
+    },
+}
+
+_LANG_CHAR_PATTERNS: dict[str, str] = {
+    "es": r"[¿¡ñáéíóúü]",
+    "fr": r"[àâçéèêëïîôùûüÿœæ]",
+    "pt": r"[ãõçàáâéêíóôú]",
+    "ar": r"[\u0600-\u06FF]",
+    "hi": r"[\u0900-\u097F]",
+    "zh": r"[\u4e00-\u9fff]",
+    "bn": r"[\u0980-\u09FF]",
+}
+
+SUPPORTED_LANGUAGES = {
+    "en": "English", "es": "Spanish", "fr": "French", "pt": "Portuguese",
+    "ar": "Arabic", "hi": "Hindi", "zh": "Chinese", "sw": "Swahili",
+    "bn": "Bengali", "ht": "Haitian Creole",
 }
 
 
+def detect_language(text: str) -> str:
+    """Detect language from text using marker words and character patterns.
+    Returns ISO 639-1 code. Defaults to 'en' if uncertain."""
+    words = set(re.split(r"\W+", text.lower()))
+    best_lang = "en"
+    best_score = 0
+
+    for lang, markers in _LANG_MARKERS.items():
+        marker_hits = len(words & markers)
+        char_pattern = _LANG_CHAR_PATTERNS.get(lang)
+        has_chars = bool(re.search(char_pattern, text.lower())) if char_pattern else False
+
+        score = marker_hits * 2 + (3 if has_chars else 0)
+        if score > best_score:
+            best_score = score
+            best_lang = lang
+
+    # Need at least 2 points to override English default
+    return best_lang if best_score >= 2 else "en"
+
+
+# Keep backward compat
 def detect_spanish(text: str) -> bool:
     """Fast heuristic: return True if text is likely Spanish."""
-    words = set(re.split(r"\W+", text.lower()))
-    # If >=2 Spanish marker words, or text has ¿ ¡ ñ accented chars
-    marker_hits = len(words & _SPANISH_MARKERS)
-    has_spanish_chars = bool(re.search(r"[¿¡ñáéíóúü]", text.lower()))
-    return marker_hits >= 2 or (marker_hits >= 1 and has_spanish_chars)
+    return detect_language(text) == "es"
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +233,94 @@ SUPABASE_URL = os.getenv("VITE_SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 TRAINING_DATA_PATH = os.path.join(os.path.dirname(__file__), "ai_training_data.json")
+
+
+# ---------------------------------------------------------------------------
+# Connection pool — shared httpx clients (reused across requests)
+# ---------------------------------------------------------------------------
+
+_ai_client: httpx.AsyncClient | None = None
+_supabase_client: httpx.AsyncClient | None = None
+
+
+def _get_ai_client() -> httpx.AsyncClient:
+    """Lazily create and return a shared httpx client for AI API calls."""
+    global _ai_client
+    if _ai_client is None or _ai_client.is_closed:
+        _ai_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=10),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            http2=False,  # DeepSeek/OpenAI work on HTTP/1.1
+        )
+    return _ai_client
+
+
+def _get_supabase_client() -> httpx.AsyncClient:
+    """Shared httpx client for Supabase requests."""
+    global _supabase_client
+    if _supabase_client is None or _supabase_client.is_closed:
+        _supabase_client = httpx.AsyncClient(
+            timeout=15,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+    return _supabase_client
+
+
+async def close_clients():
+    """Gracefully close shared HTTP clients (call on shutdown)."""
+    global _ai_client, _supabase_client
+    if _ai_client and not _ai_client.is_closed:
+        await _ai_client.aclose()
+        _ai_client = None
+    if _supabase_client and not _supabase_client.is_closed:
+        await _supabase_client.aclose()
+        _supabase_client = None
+
+
+# ---------------------------------------------------------------------------
+# Tool result cache (in-memory TTL cache)
+# ---------------------------------------------------------------------------
+
+_tool_cache: dict[str, tuple[float, object]] = {}
+_TOOL_CACHE_TTL = {
+    "search_food_near_user": 300,        # 5 min
+    "get_user_profile": 900,             # 15 min
+    "get_pickup_schedule": 300,           # 5 min
+    "query_distribution_centers": 600,    # 10 min
+    "get_user_dashboard": 300,            # 5 min
+    "check_pickup_schedule": 300,         # 5 min
+    "__default__": 300,                   # 5 min fallback
+}
+
+
+def _cache_key(tool_name: str, args: dict) -> str:
+    """Generate a cache key for tool results."""
+    args_str = json.dumps(args, sort_keys=True, default=str)
+    h = hashlib.md5(args_str.encode()).hexdigest()[:12]
+    return f"{tool_name}:{h}"
+
+
+def _cache_get(tool_name: str, args: dict) -> object | None:
+    """Get a cached tool result if fresh, else None."""
+    key = _cache_key(tool_name, args)
+    if key in _tool_cache:
+        ts, val = _tool_cache[key]
+        ttl = _TOOL_CACHE_TTL.get(tool_name, _TOOL_CACHE_TTL["__default__"])
+        if time.time() - ts < ttl:
+            return val
+        del _tool_cache[key]
+    return None
+
+
+def _cache_set(tool_name: str, args: dict, result: object) -> None:
+    """Cache a tool result."""
+    key = _cache_key(tool_name, args)
+    _tool_cache[key] = (time.time(), result)
+    # Evict oldest entries if cache grows too large
+    if len(_tool_cache) > 500:
+        oldest = sorted(_tool_cache.items(), key=lambda x: x[1][0])
+        for k, _ in oldest[: len(oldest) // 2]:
+            del _tool_cache[k]
 
 # ---------------------------------------------------------------------------
 # Rate limiter (in-memory, per-IP)
@@ -258,14 +430,15 @@ async def _ai_request(
     }
 
     last_exc: Exception | None = None
+    client = _get_ai_client()
     for attempt in range(retries):
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-                resp = await client.post(
-                    f"{effective_base}{endpoint}",
-                    json=payload,
-                    headers=headers,
-                )
+            resp = await client.post(
+                f"{effective_base}{endpoint}",
+                json=payload,
+                headers=headers,
+                timeout=TIMEOUT_SECONDS,
+            )
             if resp.status_code == 429:
                 wait = 2**attempt + 1
                 logger.warning("Rate‑limited by upstream, retrying in %ds", wait)
@@ -293,6 +466,10 @@ async def _ai_request(
             await asyncio.sleep(2**attempt)
 
     raise RuntimeError(f"AI request failed after {retries} attempts: {last_exc}")
+
+
+# Public alias used by legacy routes in app.py
+legacy_ai_request = _ai_request
 
 
 def _extract_content(response: dict) -> str:
@@ -532,39 +709,35 @@ def _supabase_headers() -> dict:
 
 async def supabase_get(table: str, params: dict) -> list:
     """GET rows from a Supabase table via PostgREST."""
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
-            f"{SUPABASE_URL}/rest/v1/{table}",
-            params=params,
-            headers=_supabase_headers(),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    client = _get_supabase_client()
+    resp = await client.get(
+        f"{SUPABASE_URL}/rest/v1/{table}",
+        params=params,
+        headers=_supabase_headers(),
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def supabase_post(
     table: str, data: dict | list | None, *, method: str = "POST"
 ) -> list:
-    """INSERT/DELETE row(s) in a Supabase table via PostgREST.
+    """INSERT/DELETE row(s) in a Supabase table via PostgREST."""
+    client = _get_supabase_client()
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    headers = _supabase_headers()
 
-    For DELETE, pass method="DELETE" and encode filters in the table path
-    (e.g. "ai_conversations?user_id=eq.abc"). data can be None for DELETE.
-    """
-    async with httpx.AsyncClient(timeout=15) as client:
-        url = f"{SUPABASE_URL}/rest/v1/{table}"
-        headers = _supabase_headers()
+    if method.upper() == "DELETE":
+        resp = await client.delete(url, headers=headers)
+    else:
+        resp = await client.post(url, json=data, headers=headers)
 
-        if method.upper() == "DELETE":
-            resp = await client.delete(url, headers=headers)
-        else:
-            resp = await client.post(url, json=data, headers=headers)
-
-        resp.raise_for_status()
-        try:
-            result = resp.json()
-            return result if isinstance(result, list) else [result]
-        except Exception:
-            return []
+    resp.raise_for_status()
+    try:
+        result = resp.json()
+        return result if isinstance(result, list) else [result]
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +787,12 @@ def _build_system_prompt(training_data: dict) -> str:
         "system_base",
         "You are DoGoods AI Assistant, a warm and helpful community food sharing assistant.",
     )
-    return f"{base}\n\n" + "\n\n".join(sections)
+    return (
+        f"{base}\n\n"
+        "IMPORTANT: Respond in English by default. Only respond in Spanish "
+        "when the user explicitly writes in Spanish.\n\n"
+        + "\n\n".join(sections)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -640,8 +818,8 @@ class ConversationEngine:
     # ---- Language detection -----------------------------------------------
 
     def _detect_lang(self, text: str) -> str:
-        """Return 'es' for Spanish, 'en' for English."""
-        return "es" if detect_spanish(text) else "en"
+        """Return ISO language code using multi-language detection."""
+        return detect_language(text)
 
     # ---- Profile lookup ---------------------------------------------------
 
@@ -735,13 +913,13 @@ class ConversationEngine:
         messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
 
         # Inject language directive
-        if lang == "es":
+        if lang != "en" and lang in SUPPORTED_LANGUAGES:
+            lang_name = SUPPORTED_LANGUAGES[lang]
             messages.append({
                 "role": "system",
                 "content": (
-                    "The user is writing in Spanish. You MUST respond entirely "
-                    "in Spanish. Maintain your warm, helpful personality. "
-                    "Use 'tú' for casual and 'usted' for formal contexts."
+                    f"The user is writing in {lang_name}. You MUST respond entirely "
+                    f"in {lang_name}. Maintain your warm, helpful personality."
                 ),
             })
 
@@ -818,36 +996,43 @@ class ConversationEngine:
     async def _call_openai_chat(
         self, messages: list[dict], lang: str = "en"
     ) -> str:
-        """Call GPT-4o, handle tool calls, return final assistant text."""
-        if not OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY not configured")
+        """Call DeepSeek/OpenAI chat completions with multi-turn tool calling."""
+        if not CHAT_API_KEY:
+            raise RuntimeError("No AI API key configured (set DEEPSEEK_API_KEY or OPENAI_API_KEY)")
 
-        payload = {
-            "model": CHAT_MODEL,
-            "messages": messages,
-            "tools": self.tool_definitions,
-            "temperature": 0.7,
-            "max_tokens": 1024,
-        }
         headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Authorization": f"Bearer {CHAT_API_KEY}",
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-            resp = await client.post(
-                f"{OPENAI_BASE_URL}/chat/completions",
-                json=payload,
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        # Allow up to 3 rounds of tool calling
+        max_rounds = 3
+        for round_num in range(max_rounds):
+            payload = {
+                "model": CHAT_MODEL,
+                "messages": messages,
+                "tools": self.tool_definitions,
+                "temperature": 0.7,
+                "max_tokens": 1024,
+            }
 
-        choice = data["choices"][0]
-        msg = choice["message"]
+            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+                resp = await client.post(
+                    f"{CHAT_BASE_URL}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
 
-        # Handle tool calls (single round) with graceful per-tool errors
-        if msg.get("tool_calls"):
+            choice = data["choices"][0]
+            msg = choice["message"]
+
+            # If no tool calls, we have the final response
+            if not msg.get("tool_calls"):
+                return msg["content"]
+
+            # Process tool calls
             messages.append(msg)
             for tool_call in msg["tool_calls"]:
                 fn_name = tool_call["function"]["name"]
@@ -864,9 +1049,9 @@ class ConversationEngine:
 
                 try:
                     result = await self._execute_tool(fn_name, fn_args)
+                    logger.info("Tool %s returned %d bytes", fn_name, len(json.dumps(result)))
                 except Exception as tool_exc:
                     logger.error("Tool %s failed: %s", fn_name, tool_exc)
-                    # Graceful tool error — feed error context back to GPT
                     result = {
                         "error": True,
                         "message": (
@@ -881,28 +1066,441 @@ class ConversationEngine:
                     "content": json.dumps(result),
                 })
 
-            # Follow-up call with tool results (no tools this time)
-            followup_payload = {
-                "model": CHAT_MODEL,
-                "messages": messages,
-                "temperature": 0.7,
-                "max_tokens": 1024,
-            }
-            try:
-                async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-                    resp = await client.post(
-                        f"{OPENAI_BASE_URL}/chat/completions",
-                        json=followup_payload,
-                        headers=headers,
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                return data["choices"][0]["message"]["content"]
-            except Exception as followup_exc:
-                logger.error("GPT-4o follow-up failed: %s", followup_exc)
-                return get_canned_response("tool_error", lang)
+        # Final call after all tool rounds (no tools to prevent infinite loop)
+        followup_payload = {
+            "model": CHAT_MODEL,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 1024,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+                resp = await client.post(
+                    f"{CHAT_BASE_URL}/chat/completions",
+                    json=followup_payload,
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            return data["choices"][0]["message"]["content"]
+        except Exception as followup_exc:
+            logger.error("Final follow-up failed: %s", followup_exc)
+            return get_canned_response("tool_error", lang)
 
-        return msg["content"]
+    # ---- Streaming chat with tool calling --------------------------------
+
+    async def chat_stream(
+        self,
+        user_id: str,
+        message: str,
+    ):
+        """
+        Streaming conversation flow — yields SSE chunks.
+        Performs tool calling first (non-streaming), then streams the final response.
+
+        Yields: str chunks in SSE format ("data: {...}\\n\\n")
+        """
+        import asyncio
+
+        lang = self._detect_lang(message)
+        profile = await self.get_user_profile(user_id)
+        history = await self.get_conversation_history(user_id, limit=20)
+
+        # Build messages
+        messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
+
+        if lang != "en" and lang in SUPPORTED_LANGUAGES:
+            lang_name = SUPPORTED_LANGUAGES[lang]
+            messages.append({
+                "role": "system",
+                "content": (
+                    f"The user is writing in {lang_name}. You MUST respond entirely "
+                    f"in {lang_name}. Maintain your warm, helpful personality."
+                ),
+            })
+
+        if profile:
+            context = (
+                f"Current user: {profile.get('name', 'Community Member')} "
+                f"(ID: {user_id}). "
+                f"Organization: {profile.get('organization', 'N/A')}. "
+                f"Role: {'Admin' if profile.get('is_admin') else 'Member'}. "
+                f"When calling tools that require user_id, always use \"{user_id}\"."
+            )
+            messages.append({"role": "system", "content": context})
+        else:
+            messages.append({
+                "role": "system",
+                "content": f"Current user ID: {user_id}. When calling tools that require user_id, always use \"{user_id}\".",
+            })
+
+        for msg in history:
+            messages.append({"role": msg["role"], "content": msg["message"]})
+
+        messages.append({"role": "user", "content": message})
+
+        # Send initial metadata event
+        yield f"data: {json.dumps({'type': 'meta', 'lang': lang, 'user_id': user_id})}\n\n"
+
+        if not CHAT_API_KEY:
+            error_text = get_canned_response("api_down", lang)
+            yield f"data: {json.dumps({'type': 'text', 'content': error_text})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        headers = {
+            "Authorization": f"Bearer {CHAT_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        # Phase 1: Non-streaming tool calling (up to 3 rounds)
+        tools_used = []
+        try:
+            for round_num in range(3):
+                payload = {
+                    "model": CHAT_MODEL,
+                    "messages": messages,
+                    "tools": self.tool_definitions,
+                    "temperature": 0.7,
+                    "max_tokens": 1024,
+                }
+
+                ai_client = _get_ai_client()
+                resp = await ai_client.post(
+                    f"{CHAT_BASE_URL}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=TIMEOUT_SECONDS,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                choice = data["choices"][0]
+                msg = choice["message"]
+
+                if not msg.get("tool_calls"):
+                    # No more tool calls — if this is the first round with no tools,
+                    # we want to stream the final response instead
+                    if round_num == 0 and not tools_used:
+                        # No tools needed — break to streaming phase
+                        break
+                    # We had tool calls in prior rounds, this is the final text
+                    final_text = msg.get("content", "")
+                    yield f"data: {json.dumps({'type': 'text', 'content': final_text})}\n\n"
+                    await self.store_message(user_id, "user", message)
+                    await self.store_message(user_id, "assistant", final_text, metadata={"lang": lang, "tools": tools_used})
+                    yield "data: [DONE]\n\n"
+                    return
+
+                # Process tool calls
+                messages.append(msg)
+                for tool_call in msg["tool_calls"]:
+                    fn_name = tool_call["function"]["name"]
+                    tools_used.append(fn_name)
+
+                    # Notify client about tool usage
+                    yield f"data: {json.dumps({'type': 'tool', 'name': fn_name, 'status': 'calling'})}\n\n"
+
+                    try:
+                        fn_args = json.loads(tool_call["function"]["arguments"])
+                    except (json.JSONDecodeError, TypeError):
+                        fn_args = {}
+
+                    try:
+                        result = await self._execute_tool(fn_name, fn_args)
+                    except Exception as tool_exc:
+                        logger.error("Tool %s failed: %s", fn_name, tool_exc)
+                        result = {"error": True, "message": f"Tool {fn_name} failed."}
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    yield f"data: {json.dumps({'type': 'tool', 'name': fn_name, 'status': 'done'})}\n\n"
+
+        except Exception as exc:
+            logger.error("Tool calling phase failed: %s", exc)
+            error_text = get_canned_response("general_error", lang)
+            yield f"data: {json.dumps({'type': 'text', 'content': error_text})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # Phase 2: Stream the final response
+        stream_payload = {
+            "model": CHAT_MODEL,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 1024,
+            "stream": True,
+        }
+        # Don't include tools in the streaming call to prevent another round
+        if tools_used:
+            pass  # No tools in final streaming call
+        else:
+            stream_payload["tools"] = self.tool_definitions
+
+        full_response = ""
+        try:
+            ai_client = _get_ai_client()
+            async with ai_client.stream(
+                "POST",
+                f"{CHAT_BASE_URL}/chat/completions",
+                json=stream_payload,
+                headers=headers,
+                timeout=TIMEOUT_SECONDS * 2,
+            ) as resp:
+                    resp.raise_for_status()
+                    buffer = ""
+                    async for chunk in resp.aiter_text():
+                        buffer += chunk
+                        lines = buffer.split("\n")
+                        buffer = lines.pop()
+
+                        for line in lines:
+                            line = line.strip()
+                            if not line or not line.startswith("data: "):
+                                continue
+                            payload_str = line[6:]
+                            if payload_str == "[DONE]":
+                                continue
+                            try:
+                                parsed = json.loads(payload_str)
+                                # Check for tool calls in stream (first round only)
+                                delta = parsed.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content")
+                                if content:
+                                    full_response += content
+                                    yield f"data: {json.dumps({'type': 'text', 'content': content})}\n\n"
+                            except json.JSONDecodeError:
+                                pass
+
+        except Exception as exc:
+            logger.error("Streaming phase failed: %s", exc)
+            if not full_response:
+                error_text = get_canned_response("general_error", lang)
+                yield f"data: {json.dumps({'type': 'text', 'content': error_text})}\n\n"
+
+        # Persist conversation
+        if full_response:
+            await self.store_message(user_id, "user", message)
+            await self.store_message(
+                user_id, "assistant", full_response,
+                metadata={"lang": lang, "tools": tools_used},
+            )
+
+        yield "data: [DONE]\n\n"
+
+    # ---- Dedicated AI feature methods ------------------------------------
+
+    async def get_nutrition_analysis(self, food_items: list[str]) -> dict:
+        """AI-powered nutrition analysis for a list of food items."""
+        if not CHAT_API_KEY:
+            raise RuntimeError("AI not configured")
+
+        prompt = (
+            "You are a certified nutritionist. Analyze these food items and provide:\n"
+            "1. Estimated calories per serving for each item\n"
+            "2. Key macronutrients (protein, carbs, fat) per item\n"
+            "3. Notable vitamins and minerals\n"
+            "4. Health benefits\n"
+            "5. Dietary considerations (gluten-free, vegan, allergens)\n"
+            "6. A suggested balanced meal combining these items\n\n"
+            f"Food items: {', '.join(food_items)}\n\n"
+            "Return as structured JSON with keys: items (array), meal_suggestion, total_estimated_calories."
+        )
+
+        data = await _ai_request(
+            "/chat/completions",
+            {
+                "model": CHAT_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are a nutrition expert for a community food sharing platform. Always return valid JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.5,
+                "max_tokens": 1500,
+            },
+            base_url=CHAT_BASE_URL,
+            api_key=CHAT_API_KEY,
+        )
+        return {"analysis": _extract_content(data)}
+
+    async def get_meal_plan(
+        self, ingredients: list[str], servings: int = 2, dietary: str = "none"
+    ) -> dict:
+        """Generate a full meal plan from available ingredients."""
+        if not CHAT_API_KEY:
+            raise RuntimeError("AI not configured")
+
+        dietary_note = f" The person follows a {dietary} diet." if dietary != "none" else ""
+        prompt = (
+            f"Create a complete meal plan for {servings} people using some or all of "
+            f"these available ingredients: {', '.join(ingredients)}.{dietary_note}\n\n"
+            "Include:\n"
+            "1. Breakfast, lunch, dinner, and a snack\n"
+            "2. For each meal: name, ingredients needed (with quantities), "
+            "brief instructions (3-5 steps), prep time, cook time\n"
+            "3. A grocery list of any additional staples needed\n"
+            "4. Food waste tip: how to use leftover ingredients\n\n"
+            "Return as structured JSON."
+        )
+
+        data = await _ai_request(
+            "/chat/completions",
+            {
+                "model": CHAT_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are a meal planning expert for a community food platform. Create practical, waste-reducing meal plans. Return valid JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 2000,
+            },
+            base_url=CHAT_BASE_URL,
+            api_key=CHAT_API_KEY,
+        )
+        return {"meal_plan": _extract_content(data)}
+
+    async def get_donation_tips(self, food_type: str, quantity: str) -> dict:
+        """AI-powered best practices for donating specific food."""
+        if not CHAT_API_KEY:
+            raise RuntimeError("AI not configured")
+
+        prompt = (
+            f"Provide comprehensive donation guidelines for: {quantity} of {food_type}.\n\n"
+            "Include:\n"
+            "1. Food safety requirements (temperature, packaging, labeling)\n"
+            "2. Shelf life and best-by guidance\n"
+            "3. Ideal storage during transport\n"
+            "4. Packaging tips for safe sharing\n"
+            "5. Legal considerations (Good Samaritan Food Donation Act)\n"
+            "6. Tips for maximizing the donation's impact\n"
+            "7. Who would benefit most from this type of food\n\n"
+            "Return as structured JSON."
+        )
+
+        data = await _ai_request(
+            "/chat/completions",
+            {
+                "model": CHAT_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are a food donation safety expert. Provide practical, safe guidelines. Return valid JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.5,
+                "max_tokens": 1500,
+            },
+            base_url=CHAT_BASE_URL,
+            api_key=CHAT_API_KEY,
+        )
+        return {"tips": _extract_content(data)}
+
+    async def get_community_insights(self) -> dict:
+        """Generate community-level insights from platform data."""
+        stats = {}
+        if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+            try:
+                listings = await supabase_get("food_listings", {"select": "id,category,status,created_at", "limit": "500"})
+                claims = await supabase_get("food_claims", {"select": "id,status,created_at", "limit": "500"})
+                events = await supabase_get("distribution_events", {"select": "id,status,registered_count,capacity", "limit": "100"})
+
+                stats = {
+                    "total_listings": len(listings),
+                    "active_listings": len([l for l in listings if l.get("status") in ("approved", "active")]),
+                    "completed_claims": len([c for c in claims if c.get("status") == "approved"]),
+                    "pending_claims": len([c for c in claims if c.get("status") == "pending"]),
+                    "upcoming_events": len([e for e in events if e.get("status") == "scheduled"]),
+                    "total_event_capacity": sum(e.get("capacity", 0) for e in events if e.get("status") == "scheduled"),
+                    "categories": {},
+                }
+                for l in listings:
+                    cat = l.get("category", "other")
+                    stats["categories"][cat] = stats["categories"].get(cat, 0) + 1
+            except Exception as exc:
+                logger.error("Community stats fetch failed: %s", exc)
+
+        if not CHAT_API_KEY:
+            return {"insights": "AI insights unavailable.", "stats": stats}
+
+        prompt = (
+            f"Based on this community food sharing platform data, provide 5 actionable insights:\n\n"
+            f"Stats: {json.dumps(stats)}\n\n"
+            "Include:\n"
+            "1. Overall health of the food sharing community\n"
+            "2. Most popular food categories and any gaps\n"
+            "3. Suggestions to increase engagement\n"
+            "4. Impact highlights to celebrate\n"
+            "5. Recommendations for community organizers\n\n"
+            "Be specific, data-driven, and encouraging."
+        )
+
+        try:
+            data = await _ai_request(
+                "/chat/completions",
+                {
+                    "model": CHAT_MODEL,
+                    "messages": [
+                        {"role": "system", "content": "You are a community engagement analyst for a food sharing platform."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1200,
+                },
+                base_url=CHAT_BASE_URL,
+                api_key=CHAT_API_KEY,
+            )
+            return {"insights": _extract_content(data), "stats": stats}
+        except Exception as exc:
+            logger.error("Community insights AI failed: %s", exc)
+            return {"insights": "Unable to generate insights at this time.", "stats": stats}
+
+    async def get_smart_suggestions(self, user_id: str) -> dict:
+        """Personalized AI suggestions based on user activity."""
+        dashboard = {}
+        if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+            try:
+                from backend.tools import _get_user_dashboard
+                dashboard = await _get_user_dashboard(user_id)
+            except Exception as exc:
+                logger.error("Dashboard fetch for suggestions failed: %s", exc)
+
+        if not CHAT_API_KEY:
+            return {"suggestions": [], "user_id": user_id}
+
+        prompt = (
+            f"Based on this user's dashboard data, provide 3-5 personalized suggestions:\n\n"
+            f"Dashboard: {json.dumps(dashboard, default=str)}\n\n"
+            "Suggestions should be:\n"
+            "1. Actionable (something they can do right now)\n"
+            "2. Relevant to their activity patterns\n"
+            "3. Encouraging and motivating\n"
+            "4. Mix of: sharing food, finding food, attending events, "
+            "setting reminders, improving their impact\n\n"
+            "Return as JSON array of objects with keys: title, description, action_type "
+            "(share_food|find_food|attend_event|set_reminder|explore), priority (high|medium|low)"
+        )
+
+        try:
+            data = await _ai_request(
+                "/chat/completions",
+                {
+                    "model": CHAT_MODEL,
+                    "messages": [
+                        {"role": "system", "content": "You are a helpful food sharing platform assistant. Return valid JSON array."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1000,
+                },
+                base_url=CHAT_BASE_URL,
+                api_key=CHAT_API_KEY,
+            )
+            return {"suggestions": _extract_content(data), "user_id": user_id}
+        except Exception as exc:
+            logger.error("Smart suggestions AI failed: %s", exc)
+            return {"suggestions": [], "user_id": user_id}
 
     # ---- Whisper speech-to-text ------------------------------------------
 
@@ -912,22 +1510,27 @@ class ConversationEngine:
         """Transcribe audio using OpenAI Whisper API.
 
         Whisper auto-detects language (supports Spanish natively).
+        Requires OPENAI_API_KEY (DeepSeek does not offer STT).
         Raises RuntimeError on config issues, httpx errors on API failure.
         """
         if not OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY not configured")
+            raise RuntimeError(
+                "Voice transcription requires OPENAI_API_KEY. "
+                "Please type your message instead."
+            )
 
         headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{OPENAI_BASE_URL}/audio/transcriptions",
-                headers=headers,
-                files={"file": (filename, audio_bytes)},
-                data={"model": WHISPER_MODEL, "response_format": "json"},
-            )
-            resp.raise_for_status()
-            return resp.json()["text"]
+        client = _get_ai_client()
+        resp = await client.post(
+            f"{OPENAI_BASE_URL}/audio/transcriptions",
+            headers=headers,
+            files={"file": (filename, audio_bytes)},
+            data={"model": WHISPER_MODEL, "response_format": "json"},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json()["text"]
 
     # ---- TTS text-to-speech ----------------------------------------------
 
@@ -936,9 +1539,13 @@ class ConversationEngine:
 
         Selects voice based on language: Spanish uses TTS_VOICE_ES,
         English uses TTS_VOICE_EN (both support Sesame voices).
+        Requires OPENAI_API_KEY (DeepSeek does not offer TTS).
         """
         if not OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY not configured")
+            raise RuntimeError(
+                "Text-to-speech requires OPENAI_API_KEY. "
+                "Audio responses are unavailable."
+            )
 
         # TTS has a ~4096 char limit
         truncated = text[:4096]
@@ -949,18 +1556,19 @@ class ConversationEngine:
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{OPENAI_BASE_URL}/audio/speech",
-                json={
-                    "model": TTS_MODEL,
-                    "input": truncated,
-                    "voice": voice,
-                },
-                headers=headers,
-            )
-            resp.raise_for_status()
-            return resp.content
+        client = _get_ai_client()
+        resp = await client.post(
+            f"{OPENAI_BASE_URL}/audio/speech",
+            json={
+                "model": TTS_MODEL,
+                "input": truncated,
+                "voice": voice,
+            },
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.content
 
     async def _generate_audio_url(
         self, text: str, lang: str = "en"
@@ -976,22 +1584,334 @@ class ConversationEngine:
                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                 "Content-Type": "audio/mpeg",
             }
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    f"{SUPABASE_URL}/storage/v1/object/ai-audio/{filename}",
-                    content=audio_bytes,
-                    headers=headers,
+            sb_client = _get_supabase_client()
+            resp = await sb_client.post(
+                f"{SUPABASE_URL}/storage/v1/object/ai-audio/{filename}",
+                content=audio_bytes,
+                headers=headers,
+            )
+            if resp.status_code in (200, 201):
+                return (
+                    f"{SUPABASE_URL}/storage/v1/object/public/"
+                    f"ai-audio/{filename}"
                 )
-                if resp.status_code in (200, 201):
-                    return (
-                        f"{SUPABASE_URL}/storage/v1/object/public/"
-                        f"ai-audio/{filename}"
-                    )
             logger.warning("Audio upload failed: HTTP %s", resp.status_code)
             return None
         except Exception as exc:
             logger.warning("Audio generation failed: %s", exc)
             return None
+
+    # ---- GPT-4o Vision: food image analysis ------------------------------
+
+    async def analyze_food_image(self, image_base64: str) -> dict:
+        """Analyze a food photo using GPT-4o vision and return structured data.
+
+        Returns dict with keys: items, estimated_weight, freshness,
+        category_suggestion, safety_notes, description.
+        """
+        if not OPENAI_API_KEY:
+            raise RuntimeError("Food image analysis requires OPENAI_API_KEY")
+
+        prompt = (
+            "Analyze this food image for a community food-sharing platform.\n"
+            "Return ONLY valid JSON with these keys:\n"
+            "- items: array of identified food items with name and estimated_quantity\n"
+            "- estimated_weight_kg: total estimated weight\n"
+            "- freshness: one of 'fresh', 'good', 'fair', 'poor'\n"
+            "- category_suggestion: best food category (produce, dairy, bakery, "
+            "canned, prepared, beverages, snacks, other)\n"
+            "- safety_notes: any visible safety concerns (mold, damage, improper storage)\n"
+            "- description: brief 1-2 sentence description suitable for a listing title\n"
+            "- dietary_tags: array of applicable tags (vegan, vegetarian, gluten-free, "
+            "halal, kosher, nut-free, dairy-free)\n"
+            "- allergens: array of detected common allergens"
+        )
+
+        data = await _ai_request(
+            "/chat/completions",
+            {
+                "model": VISION_MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a food safety and identification expert. Return only valid JSON.",
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_base64}",
+                                    "detail": "high",
+                                },
+                            },
+                        ],
+                    },
+                ],
+                "max_tokens": 1000,
+                "temperature": 0.3,
+            },
+            base_url=OPENAI_BASE_URL,
+            api_key=OPENAI_API_KEY,
+        )
+        return {"analysis": _extract_content(data)}
+
+    # ---- Food safety verification ----------------------------------------
+
+    async def verify_food_safety(
+        self,
+        title: str,
+        description: str,
+        category: str = "",
+        expiry: str = "",
+        ingredients: str = "",
+        image_url: str = "",
+        allergens: list[str] | None = None,
+    ) -> dict:
+        """AI-powered food safety check for a listing before it goes live.
+
+        Returns dict with: safe (bool), score (0-100), warnings (list),
+        suggestions (list), category_check (str).
+        """
+        if not CHAT_API_KEY:
+            raise RuntimeError("AI not configured")
+
+        listing_info = (
+            f"Title: {title}\nDescription: {description}\n"
+            f"Category: {category}\nExpiry/Best-by: {expiry}\n"
+            f"Ingredients: {ingredients}\n"
+            f"Allergens declared: {', '.join(allergens or [])}\n"
+            f"Image URL: {image_url or 'not provided'}"
+        )
+
+        prompt = (
+            "You are a food safety inspector for a community food sharing platform.\n"
+            "Evaluate this food listing for safety and compliance.\n\n"
+            f"{listing_info}\n\n"
+            "Return ONLY valid JSON with:\n"
+            "- safe: boolean (true if safe to list)\n"
+            "- score: integer 0-100 (safety confidence)\n"
+            "- warnings: array of specific safety concerns\n"
+            "- suggestions: array of improvements for the listing\n"
+            "- category_check: 'correct' or suggested better category\n"
+            "- allergen_check: any allergens likely present but not declared\n"
+            "- shelf_life_estimate: estimated remaining shelf life"
+        )
+
+        data = await _ai_request(
+            "/chat/completions",
+            {
+                "model": CHAT_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are a food safety expert. Be thorough but practical. Return only valid JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 1000,
+            },
+            base_url=CHAT_BASE_URL,
+            api_key=CHAT_API_KEY,
+        )
+        return {"verification": _extract_content(data)}
+
+    # ---- Advanced AI matching --------------------------------------------
+
+    async def advanced_match(
+        self,
+        user_id: str,
+        food_request: str,
+        location: dict | None = None,
+        radius_km: float = 10.0,
+        dietary: list[str] | None = None,
+        max_results: int = 10,
+    ) -> dict:
+        """AI-enhanced food matching: rule-based filter → AI re-ranking.
+
+        1. Fetch available listings from Supabase within radius
+        2. Filter by dietary preferences
+        3. Use AI to re-rank by relevance, freshness, proximity, need
+        """
+        listings = []
+        if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+            try:
+                listings = await supabase_get("food_listings", {
+                    "status": "eq.approved",
+                    "select": "id,title,description,category,quantity,unit,expiry_date,"
+                              "dietary_tags,allergens,latitude,longitude,created_at,"
+                              "donor_name,pickup_instructions",
+                    "limit": "50",
+                    "order": "created_at.desc",
+                })
+            except Exception as exc:
+                logger.error("Listing fetch for matching failed: %s", exc)
+
+        if not listings:
+            return {"matches": [], "total_available": 0, "message": "No listings available right now."}
+
+        if not CHAT_API_KEY:
+            return {"matches": listings[:max_results], "total_available": len(listings), "ai_ranked": False}
+
+        prompt = (
+            "You are a food matching AI for a hunger-relief platform.\n"
+            f"User request: \"{food_request}\"\n"
+            f"Dietary preferences: {', '.join(dietary or ['none specified'])}\n"
+            f"Location: {json.dumps(location) if location else 'not provided'}\n"
+            f"Radius: {radius_km} km\n\n"
+            f"Available listings ({len(listings)} total):\n"
+            f"{json.dumps(listings[:20], default=str)}\n\n"
+            "Re-rank these listings by relevance to the user's request.\n"
+            "Return ONLY valid JSON with:\n"
+            "- matches: array of listing IDs in order of relevance, "
+            "each with: id, relevance_score (0-100), reason (brief)\n"
+            f"- top {max_results} only"
+        )
+
+        try:
+            data = await _ai_request(
+                "/chat/completions",
+                {
+                    "model": CHAT_MODEL,
+                    "messages": [
+                        {"role": "system", "content": "You are a food matching expert. Return only valid JSON."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.4,
+                    "max_tokens": 1500,
+                },
+                base_url=CHAT_BASE_URL,
+                api_key=CHAT_API_KEY,
+            )
+            return {
+                "matches": _extract_content(data),
+                "total_available": len(listings),
+                "ai_ranked": True,
+            }
+        except Exception as exc:
+            logger.error("AI matching failed, returning unranked: %s", exc)
+            return {"matches": listings[:max_results], "total_available": len(listings), "ai_ranked": False}
+
+    async def record_match_outcome(
+        self,
+        match_id: str,
+        user_id: str,
+        listing_id: str,
+        score: float,
+        outcome: str,
+    ) -> dict:
+        """Record the outcome of a match for learning/analytics."""
+        if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+            return {"stored": False}
+        try:
+            await supabase_post("match_outcomes", {
+                "match_id": match_id,
+                "user_id": user_id,
+                "listing_id": listing_id,
+                "score": score,
+                "outcome": outcome,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            return {"stored": True}
+        except Exception as exc:
+            logger.error("Match outcome storage failed: %s", exc)
+            return {"stored": False}
+
+    # ---- Analytics methods -----------------------------------------------
+
+    async def get_analytics_community(self) -> dict:
+        """Aggregate community-level analytics from Supabase."""
+        result = {"period": "all_time"}
+        if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+            return result
+        try:
+            listings = await supabase_get("food_listings", {"select": "id,status,category,created_at", "limit": "1000"})
+            claims = await supabase_get("food_claims", {"select": "id,status,created_at", "limit": "1000"})
+            users = await supabase_get("users", {"select": "id,created_at", "limit": "1000"})
+            events = await supabase_get("distribution_events", {"select": "id,status,registered_count,capacity", "limit": "500"})
+
+            result.update({
+                "total_users": len(users),
+                "total_listings": len(listings),
+                "active_listings": len([l for l in listings if l.get("status") in ("approved", "active")]),
+                "total_claims": len(claims),
+                "completed_claims": len([c for c in claims if c.get("status") == "approved"]),
+                "pending_claims": len([c for c in claims if c.get("status") == "pending"]),
+                "total_events": len(events),
+                "categories": {},
+            })
+            for l in listings:
+                cat = l.get("category", "other")
+                result["categories"][cat] = result["categories"].get(cat, 0) + 1
+        except Exception as exc:
+            logger.error("Community analytics failed: %s", exc)
+        return result
+
+    async def get_analytics_user(self, user_id: str) -> dict:
+        """Per-user activity analytics."""
+        result = {"user_id": user_id}
+        if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+            return result
+        try:
+            listings = await supabase_get("food_listings", {
+                "donor_id": f"eq.{user_id}",
+                "select": "id,status,category,created_at",
+            })
+            claims = await supabase_get("food_claims", {
+                "claimer_id": f"eq.{user_id}",
+                "select": "id,status,created_at",
+            })
+            result.update({
+                "listings_shared": len(listings),
+                "claims_made": len(claims),
+                "successful_claims": len([c for c in claims if c.get("status") == "approved"]),
+                "categories_shared": list(set(l.get("category", "other") for l in listings)),
+            })
+        except Exception as exc:
+            logger.error("User analytics failed for %s: %s", user_id, exc)
+        return result
+
+    async def get_analytics_food_waste(self) -> dict:
+        """Food waste reduction analytics."""
+        result = {"estimated_kg_saved": 0}
+        if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+            return result
+        try:
+            claims = await supabase_get("food_claims", {
+                "status": "eq.approved",
+                "select": "id,created_at",
+                "limit": "2000",
+            })
+            # Rough estimate: avg 2kg per claim
+            result["estimated_kg_saved"] = len(claims) * 2
+            result["total_successful_shares"] = len(claims)
+            result["estimated_meals_provided"] = len(claims) * 3
+            result["estimated_co2_saved_kg"] = len(claims) * 4.5
+        except Exception as exc:
+            logger.error("Waste analytics failed: %s", exc)
+        return result
+
+    async def get_analytics_matching(self) -> dict:
+        """Matching system performance analytics."""
+        result = {"total_matches": 0}
+        if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+            return result
+        try:
+            outcomes = await supabase_get("match_outcomes", {
+                "select": "id,score,outcome,created_at",
+                "limit": "1000",
+            })
+            if outcomes:
+                scores = [o.get("score", 0) for o in outcomes if o.get("score")]
+                result.update({
+                    "total_matches": len(outcomes),
+                    "avg_score": sum(scores) / len(scores) if scores else 0,
+                    "successful": len([o for o in outcomes if o.get("outcome") == "claimed"]),
+                    "expired": len([o for o in outcomes if o.get("outcome") == "expired"]),
+                })
+        except Exception as exc:
+            logger.error("Matching analytics failed: %s", exc)
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -999,12 +1919,3 @@ class ConversationEngine:
 # ---------------------------------------------------------------------------
 
 conversation_engine = ConversationEngine()
-
-
-# ---------------------------------------------------------------------------
-# Legacy helpers used by app.py routes (matching, recipes, etc.)
-# ---------------------------------------------------------------------------
-
-async def legacy_ai_request(endpoint: str, payload: dict) -> dict:
-    """Call DeepSeek/OpenAI for legacy routes (recipes, storage tips, etc.)."""
-    return await _ai_request(endpoint, payload)

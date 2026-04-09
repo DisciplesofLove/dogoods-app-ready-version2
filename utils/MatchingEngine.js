@@ -1,16 +1,14 @@
 import { reportError } from './helpers';
 
-// OpenAI Configuration
+// OpenAI/DeepSeek Configuration
+const _deepseekKey = (typeof window !== 'undefined' && window.__ENV__ && window.__ENV__.DEEPSEEK_API_KEY) ||
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_DEEPSEEK_API_KEY) || '';
+const _openaiKey = (typeof window !== 'undefined' && (window.OPENAI_API_KEY || (window.__ENV__ && window.__ENV__.OPENAI_API_KEY))) || '';
 const OPENAI_CONFIG = {
-    API_KEY: window.OPENAI_API_KEY || '',
-    API_ENDPOINT: 'https://api.openai.com/v1',
-    MODEL: 'gpt-4o-mini'
+    API_KEY: _deepseekKey || _openaiKey || '',
+    API_ENDPOINT: _deepseekKey ? 'https://api.deepseek.com/v1' : 'https://api.openai.com/v1',
+    MODEL: _deepseekKey ? 'deepseek-chat' : 'gpt-4o-mini'
 };
-
-// Load API key from environment if available
-if (typeof window !== 'undefined' && window.__ENV__ && window.__ENV__.OPENAI_API_KEY) {
-    OPENAI_CONFIG.API_KEY = window.__ENV__.OPENAI_API_KEY;
-}
 
 class MatchingEngine {
     constructor(aiModel = null) {

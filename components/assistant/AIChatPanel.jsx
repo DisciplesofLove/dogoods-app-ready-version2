@@ -6,36 +6,157 @@ import { textToSpeech, playAudioBlob, transcribeAudio } from '../../utils/openai
 
 // ─── Quick action presets ─────────────────────────────
 const QUICK_ACTIONS_EN = [
-  { label: '🔍 Find food near me', message: 'What food is available near me?' },
-  { label: '📦 My pickups', message: 'What are my upcoming pickups?' },
-  { label: '🍳 Suggest a recipe', message: 'Can you suggest a recipe from available food?' },
-  { label: '🤝 Share food', message: 'I want to share some food' },
-  { label: '📅 Upcoming events', message: 'What distribution events are coming up?' },
-  { label: '❓ How it works', message: 'How does DoGoods work?' },
+  { label: '🔍 Find food near me', message: 'What food is available near me right now?' },
+  { label: '🍳 Recipe ideas', message: 'Suggest a creative recipe I can make with common surplus food' },
+  { label: '📦 My pickups', message: 'What are my upcoming pickups and schedules?' },
+  { label: '🤝 Share food', message: 'I have surplus food to share. How do I list it?' },
+  { label: '🥗 Nutrition check', message: 'Analyze the nutrition of bananas, eggs, spinach, and rice' },
+  { label: '📋 Meal planner', message: 'Create a meal plan using rice, beans, tomatoes, and onion for 4 people' },
+  { label: '🌍 My impact', message: 'Show me my environmental and community impact stats' },
+  { label: '📅 Events near me', message: 'What community distribution events are coming up?' },
+  { label: '💡 Storage tips', message: 'Give me tips on how to store fresh produce to make it last longer' },
+  { label: '🎁 Donation tips', message: 'I want to donate 10 loaves of bread. What should I know about food safety and packaging?' },
+  { label: '❓ How it works', message: 'How does DoGoods work? Walk me through it step by step' },
 ]
 
 const QUICK_ACTIONS_ES = [
-  { label: '🔍 Buscar comida', message: '¿Qué comida hay disponible cerca de mí?' },
-  { label: '📦 Mis recogidas', message: '¿Cuáles son mis próximas recogidas?' },
-  { label: '🍳 Sugerir receta', message: '¿Puedes sugerirme una receta con comida disponible?' },
-  { label: '🤝 Compartir comida', message: 'Quiero compartir comida' },
-  { label: '📅 Eventos', message: '¿Qué eventos de distribución hay próximamente?' },
-  { label: '❓ Cómo funciona', message: '¿Cómo funciona DoGoods?' },
+  { label: '🔍 Buscar comida', message: '¿Qué comida hay disponible cerca de mí ahora?' },
+  { label: '🍳 Ideas de recetas', message: 'Sugiere una receta creativa con alimentos excedentes comunes' },
+  { label: '📦 Mis recogidas', message: '¿Cuáles son mis próximas recogidas y horarios?' },
+  { label: '🤝 Compartir comida', message: 'Tengo comida excedente para compartir. ¿Cómo la publico?' },
+  { label: '🥗 Nutrición', message: 'Analiza la nutrición de plátanos, huevos, espinacas y arroz' },
+  { label: '📋 Plan de comidas', message: 'Crea un plan de comidas con arroz, frijoles, tomates y cebolla para 4 personas' },
+  { label: '🌍 Mi impacto', message: 'Muéstrame mi impacto ambiental y comunitario' },
+  { label: '📅 Eventos', message: '¿Qué eventos de distribución comunitaria hay próximamente?' },
+  { label: '💡 Consejos', message: 'Dame consejos sobre cómo almacenar productos frescos para que duren más' },
+  { label: '🎁 Donar comida', message: 'Quiero donar 10 barras de pan. ¿Qué debo saber sobre seguridad alimentaria y empaque?' },
+  { label: '❓ Cómo funciona', message: '¿Cómo funciona DoGoods? Guíame paso a paso' },
 ]
+
+// ─── Simple markdown renderer ─────────────────────────
+function renderMarkdown(text) {
+  if (!text) return null
+  
+  const lines = text.split('\n')
+  const elements = []
+  let listItems = []
+  let listType = null // 'ul' or 'ol'
+  
+  const flushList = () => {
+    if (listItems.length > 0) {
+      const Tag = listType === 'ol' ? 'ol' : 'ul'
+      const listClass = listType === 'ol'
+        ? 'list-decimal list-inside space-y-0.5 my-1'
+        : 'list-disc list-inside space-y-0.5 my-1'
+      elements.push(
+        <Tag key={`list-${elements.length}`} className={listClass}>
+          {listItems.map((item, i) => <li key={i}>{formatInline(item)}</li>)}
+        </Tag>
+      )
+      listItems = []
+      listType = null
+    }
+  }
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    
+    // Bullet list item
+    const bulletMatch = line.match(/^[\s]*[-*•]\s+(.+)/)
+    if (bulletMatch) {
+      if (listType === 'ol') flushList()
+      listType = 'ul'
+      listItems.push(bulletMatch[1])
+      continue
+    }
+    
+    // Numbered list item
+    const numMatch = line.match(/^[\s]*(\d+)[.)]\s+(.+)/)
+    if (numMatch) {
+      if (listType === 'ul') flushList()
+      listType = 'ol'
+      listItems.push(numMatch[2])
+      continue
+    }
+    
+    // Not a list item — flush any pending list
+    flushList()
+    
+    // Empty line
+    if (!line.trim()) {
+      elements.push(<br key={`br-${i}`} />)
+      continue
+    }
+    
+    // Heading (## or ###)
+    const headingMatch = line.match(/^(#{1,3})\s+(.+)/)
+    if (headingMatch) {
+      const level = headingMatch[1].length
+      const cls = level === 1 ? 'font-bold text-base mt-2 mb-1' :
+                  level === 2 ? 'font-semibold text-sm mt-1.5 mb-0.5' :
+                  'font-medium text-sm mt-1 mb-0.5'
+      elements.push(<div key={`h-${i}`} className={cls}>{formatInline(headingMatch[2])}</div>)
+      continue
+    }
+    
+    // Regular paragraph
+    elements.push(<p key={`p-${i}`} className="mb-0.5">{formatInline(line)}</p>)
+  }
+  
+  flushList()
+  return elements
+}
+
+function formatInline(text) {
+  // Handle **bold**, *italic*, `code`, and emoji
+  const parts = []
+  let remaining = text
+  let key = 0
+  
+  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g
+  let lastIndex = 0
+  let match
+  
+  while ((match = regex.exec(remaining)) !== null) {
+    // Text before the match
+    if (match.index > lastIndex) {
+      parts.push(remaining.slice(lastIndex, match.index))
+    }
+    
+    if (match[2]) {
+      // **bold**
+      parts.push(<strong key={key++} className="font-semibold text-cyan-200">{match[2]}</strong>)
+    } else if (match[3]) {
+      // *italic*
+      parts.push(<em key={key++} className="italic">{match[3]}</em>)
+    } else if (match[4]) {
+      // `code`
+      parts.push(<code key={key++} className="bg-slate-600/50 px-1 py-0.5 rounded text-xs text-cyan-300 font-mono">{match[4]}</code>)
+    }
+    
+    lastIndex = match.index + match[0].length
+  }
+  
+  if (lastIndex < remaining.length) {
+    parts.push(remaining.slice(lastIndex))
+  }
+  
+  return parts.length > 0 ? parts : text
+}
 
 // ─── Typing indicator ─────────────────────────────────
 function TypingIndicator() {
   return (
-    <div className="flex items-center gap-2 px-4 py-3">
-      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-sm shadow-cyan-400/30">
-        <span className="text-[10px]">🤖</span>
+    <div className="flex items-center gap-2 px-4 py-3 animate-fadeIn">
+      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-md shadow-cyan-400/30">
+        <span className="text-[10px]">✨</span>
       </div>
-      <div className="flex items-center gap-1 bg-slate-700/50 backdrop-blur-sm rounded-2xl px-3 py-2 border border-cyan-500/20">
+      <div className="flex items-center gap-1.5 bg-slate-700/50 backdrop-blur-sm rounded-2xl px-4 py-2.5 border border-cyan-500/20">
         <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
         <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
         <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
       </div>
-      <span className="text-xs text-cyan-300/60 ml-1">Nouri is thinking...</span>
+      <span className="text-xs text-cyan-300/60 ml-1 animate-pulse">Nouri is thinking...</span>
     </div>
   )
 }
@@ -106,11 +227,11 @@ function MessageBubble({ msg, onFeedback, language }) {
   }
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3 animate-fadeIn`}>
       <div className={`max-w-[85%] ${isUser ? '' : 'flex items-start gap-2'}`}>
         {/* Nouri avatar */}
         {!isUser && (
-          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center mt-1 shadow-sm shadow-cyan-400/30">
+          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center mt-1 shadow-md shadow-cyan-400/30 ring-2 ring-cyan-400/20">
             <svg viewBox="0 0 100 100" className="w-5 h-5">
               <circle cx="50" cy="52" r="36" fill="#f0f4f8" />
               <rect x="26" y="38" rx="12" ry="12" width="48" height="24" fill="#1e293b" opacity="0.85" />
@@ -122,15 +243,24 @@ function MessageBubble({ msg, onFeedback, language }) {
 
         <div>
           <div
-            className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+            className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed transition-all duration-200 ${
               isUser
-                ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-br-md shadow-sm shadow-cyan-500/20'
+                ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-br-md shadow-md shadow-cyan-500/20'
                 : msg.isError
                   ? 'bg-red-900/30 text-red-300 border border-red-500/30 rounded-bl-md backdrop-blur-sm'
                   : 'bg-slate-700/50 text-slate-100 rounded-bl-md border border-slate-600/30 backdrop-blur-sm'
             }`}
           >
-            <p className="whitespace-pre-wrap">{msg.message}</p>
+            {isUser ? (
+              <p className="whitespace-pre-wrap">{msg.message}</p>
+            ) : (
+              <div className="whitespace-pre-wrap">
+                {renderMarkdown(msg.message)}
+                {msg.isStreaming && (
+                  <span className="inline-block w-2 h-4 bg-cyan-400 ml-0.5 animate-blink rounded-sm" />
+                )}
+              </div>
+            )}
           </div>
 
           {/* Tool result cards */}
@@ -224,6 +354,8 @@ function AIChatPanel() {
     messages,
     sendMessage,
     isLoading,
+    isStreaming,
+    activeTools,
     error,
     language,
     clearHistory,
@@ -736,9 +868,9 @@ function AIChatPanel() {
             </svg>
           </div>
           <div>
-            <h3 className="font-semibold text-sm text-white">Nouri AI Assistant</h3>
+            <h3 className="font-semibold text-sm text-white">Nouri AI</h3>
             <p className="text-cyan-300/60 text-[10px]">
-              {isAuthenticated ? 'Your AI food assistant' : 'Sign in for full features'}
+              {isStreaming ? 'Typing...' : isLoading ? 'Thinking...' : isAuthenticated ? 'Your food sharing assistant ✨' : 'Sign in for full features'}
             </p>
           </div>
           {/* Online indicator */}
@@ -956,7 +1088,39 @@ function AIChatPanel() {
           />
         ))}
 
-        {isLoading && <TypingIndicator />}
+        {isLoading && !isStreaming && <TypingIndicator />}
+
+        {/* Tool calling indicator */}
+        {activeTools && activeTools.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-2 mb-2 animate-fadeIn">
+            <div className="flex items-center gap-1.5 bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-1.5">
+              <svg className="w-3.5 h-3.5 text-cyan-400 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.49-8.49l2.83-2.83M2 12h4m12 0h4m-3.93 7.07l-2.83-2.83M6.34 6.34L3.51 3.51" />
+              </svg>
+              <span className="text-xs text-cyan-300">
+                {activeTools.map(t => t.replace(/_/g, ' ')).join(', ')}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Quick actions — show when only the welcome message is visible */}
+        {messages.length <= 1 && !isLoading && (
+          <div className="mt-4 animate-fadeIn">
+            <p className="text-xs text-slate-500 mb-2 px-1">{language === 'es' ? 'Prueba preguntar:' : 'Try asking:'}</p>
+            <div className="grid grid-cols-2 gap-2">
+              {quickActions.slice(0, 8).map((action, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleQuickAction(action.message)}
+                  className="text-left text-xs bg-slate-700/30 hover:bg-cyan-500/15 text-slate-300 hover:text-cyan-200 px-3 py-2.5 rounded-xl transition-all duration-200 border border-slate-600/20 hover:border-cyan-500/30 hover:shadow-sm hover:shadow-cyan-500/10"
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div ref={messagesEndRef} />
       </div>
@@ -986,12 +1150,15 @@ function AIChatPanel() {
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={language === 'es' ? '¿En qué puedo ayudarte?' : 'Ask me anything...'}
-            className="w-full resize-none rounded-xl border border-slate-600/50 bg-slate-800/60 text-slate-100 placeholder-slate-500 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 px-3 py-2 text-sm max-h-24 outline-none transition-colors"
+            placeholder={language === 'es' ? 'Pregúntame lo que quieras... ✨' : 'Ask me anything... ✨'}
+            className="w-full resize-none rounded-xl border border-slate-600/50 bg-slate-800/60 text-slate-100 placeholder-slate-500 focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/20 px-3.5 py-2.5 text-sm max-h-24 outline-none transition-all duration-200"
             rows={1}
             disabled={isLoading}
             aria-label="Message input"
           />
+          {inputText.length > 0 && (
+            <span className="absolute right-2 bottom-1.5 text-[10px] text-slate-600">{inputText.length}</span>
+          )}
         </div>
 
         {/* Voice mode — AI speaks responses aloud */}
@@ -1033,6 +1200,20 @@ function AIChatPanel() {
         .nourish-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .nourish-scrollbar::-webkit-scrollbar-thumb { background: rgba(34,211,238,0.2); border-radius: 4px; }
         .nourish-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(34,211,238,0.4); }
+
+        /* Message fade-in */
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-out; }
+
+        /* Streaming cursor blink */
+        @keyframes blink {
+          0%, 50% { opacity: 1; }
+          51%, 100% { opacity: 0; }
+        }
+        .animate-blink { animation: blink 0.8s step-end infinite; }
 
         /* Voice orb animations */
         @keyframes voice-ring-out {

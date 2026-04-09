@@ -1,18 +1,18 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuthContext } from '../AuthContext.jsx'
 import aiChatService from '../services/aiChatService.js'
 
 const INITIAL_MESSAGE = {
   id: 'welcome',
   role: 'assistant',
-  message: "Hi! I'm Nouri, your DoGoods assistant. I can help you find food, share food, check your pickups, get recipes, set reminders, and more. How can I help you today?",
+  message: "Hey there! 👋 I'm **Nouri**, your DoGoods assistant. I can help you find food, share surplus, get recipes, check your pickups, and explore your community impact. What would you like to do?",
   timestamp: new Date().toISOString(),
 }
 
 const INITIAL_MESSAGE_ES = {
   id: 'welcome',
   role: 'assistant',
-  message: '¡Hola! Soy Nouri, tu asistente de DoGoods. Puedo ayudarte a encontrar comida, compartir comida, verificar tus recogidas, obtener recetas, crear recordatorios y más. ¿En qué puedo ayudarte hoy?',
+  message: '¡Hola! 👋 Soy **Nouri**, tu asistente de DoGoods. Puedo ayudarte a encontrar comida, compartir excedentes, obtener recetas, verificar tus recogidas y explorar tu impacto comunitario. ¿En qué puedo ayudarte?',
   timestamp: new Date().toISOString(),
 }
 
@@ -23,6 +23,9 @@ export function useAIChat() {
   const [error, setError] = useState(null)
   const [language, setLanguage] = useState('en')
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [activeTools, setActiveTools] = useState([]) // tools currently being called
+  const abortRef = useRef(null)
 
   // Load conversation history from backend when user logs in
   useEffect(() => {
@@ -63,44 +66,80 @@ export function useAIChat() {
       timestamp: new Date().toISOString(),
     }
 
+    const assistantId = `assistant-${Date.now()}`
+
     setMessages(prev => [...prev, userMsg])
     setIsLoading(true)
+    setIsStreaming(true)
     setError(null)
 
+    // Create a placeholder assistant message for streaming
+    const placeholderMsg = {
+      id: assistantId,
+      role: 'assistant',
+      message: '',
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+    }
+    setMessages(prev => [...prev, placeholderMsg])
+
+    // Abort previous request if any
+    if (abortRef.current) abortRef.current.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     try {
-      const result = await aiChatService.sendMessage(text.trim(), {
+      const result = await aiChatService.streamMessage(text.trim(), {
         userId: user?.id || 'anonymous',
+        onChunk: (_chunk, fullText) => {
+          setMessages(prev =>
+            prev.map(m => m.id === assistantId ? { ...m, message: fullText } : m)
+          )
+        },
+        onToolCall: ({ name, status }) => {
+          if (status === 'calling') {
+            setActiveTools(prev => [...prev, name])
+          } else if (status === 'done') {
+            setActiveTools(prev => prev.filter(t => t !== name))
+          }
+        },
+        signal: controller.signal,
       })
 
-      // Update language from backend detection
+      // Update language from detection
       if (result.lang && result.lang !== language) {
         setLanguage(result.lang)
       }
 
-      const assistantMsg = {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        message: result.response,
-        audioUrl: result.audioUrl,
-        timestamp: new Date().toISOString(),
-      }
-
-      setMessages(prev => [...prev, assistantMsg])
+      // Finalize the streaming message
+      setMessages(prev =>
+        prev.map(m => m.id === assistantId
+          ? { ...m, message: result.response, isStreaming: false }
+          : m
+        )
+      )
     } catch (err) {
-      const errorMsg = {
-        id: `error-${Date.now()}`,
-        role: 'assistant',
-        message: language === 'es'
-          ? 'Estoy teniendo un pequeño problema. ¿Puedes intentar de nuevo en un momento?'
-          : "I'm having a little trouble right now. Please try again in a moment.",
-        isError: true,
-        timestamp: new Date().toISOString(),
-      }
+      if (err.name === 'AbortError') return
 
-      setMessages(prev => [...prev, errorMsg])
+      // Remove the empty placeholder and add error message
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== assistantId)
+        return [...filtered, {
+          id: `error-${Date.now()}`,
+          role: 'assistant',
+          message: language === 'es'
+            ? 'Estoy teniendo un pequeño problema. ¿Puedes intentar de nuevo en un momento?'
+            : "I'm having a little trouble right now. Please try again in a moment.",
+          isError: true,
+          timestamp: new Date().toISOString(),
+        }]
+      })
       setError(err.message)
     } finally {
       setIsLoading(false)
+      setIsStreaming(false)
+      setActiveTools([])
+      abortRef.current = null
     }
   }, [isLoading, language, user?.id])
 
@@ -185,6 +224,8 @@ export function useAIChat() {
     sendMessage,
     sendVoice,
     isLoading,
+    isStreaming,
+    activeTools,
     error,
     language,
     setLanguage,
