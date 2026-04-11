@@ -750,96 +750,117 @@ export const useCommunityPosts = (filters = {}) => {
   }
 }
 
-// AI Assistant hook
+// AI Assistant hook — routes through FastAPI backend at /api/*
 export const useAI = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  const _backendPost = useCallback(async (endpoint, body) => {
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!resp.ok) throw new Error(`AI service error: ${resp.status}`)
+    return resp.json()
+  }, [])
 
   const chatWithNourish = useCallback(async (message, context = '') => {
     try {
       setIsLoading(true)
       setError(null)
-      
-      // Import AI functions dynamically to avoid circular dependencies
-      const { chatWithNourish: chatFn } = await import('../aiAgent.js')
-      const result = await chatFn(message, context)
-      
-      return result
-    } catch (error) {
-      setError(error.message)
-      throw error
+      const data = await _backendPost('/api/ai/chat', {
+        user_id: 'anonymous',
+        message: context ? `${context}\n\n${message}` : message,
+      })
+      return { content: data.text, type: 'text' }
+    } catch (err) {
+      setError(err.message)
+      throw err
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [_backendPost])
 
   const getRecipeSuggestions = useCallback(async (ingredients) => {
     try {
       setIsLoading(true)
       setError(null)
-      
-      const { getRecipeSuggestions: getRecipesFn } = await import('../aiAgent.js')
-      const result = await getRecipesFn(ingredients)
-      
-      return result
-    } catch (error) {
-      setError(error.message)
-      throw error
+      const data = await _backendPost('/api/recipes', { ingredients })
+      // Backend returns { recipes: "..." } as text; parse if possible
+      let recipes = data.recipes
+      if (typeof recipes === 'string') {
+        try { recipes = JSON.parse(recipes) } catch { /* keep as text */ }
+      }
+      return { recipes: Array.isArray(recipes) ? recipes : [{ name: 'Recipe', ingredients, instructions: recipes, prepTime: 'N/A', cookTime: 'N/A' }] }
+    } catch (err) {
+      setError(err.message)
+      throw err
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [_backendPost])
 
   const getStorageTips = useCallback(async (food) => {
     try {
       setIsLoading(true)
       setError(null)
-      
-      const { getStorageTips: getStorageFn } = await import('../aiAgent.js')
-      const result = await getStorageFn(food)
-      
-      return result
-    } catch (error) {
-      setError(error.message)
-      throw error
+      const data = await _backendPost('/api/storage-tips', { food })
+      let tips = data.tips
+      if (typeof tips === 'string') {
+        try { tips = JSON.parse(tips) } catch { /* keep as text */ }
+      }
+      return { food, tips: Array.isArray(tips) ? tips : [tips], shelfLife: {} }
+    } catch (err) {
+      setError(err.message)
+      throw err
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [_backendPost])
 
   const getFoodPairings = useCallback(async (food) => {
     try {
       setIsLoading(true)
       setError(null)
-      
-      const { getFoodPairings: getPairingsFn } = await import('../aiAgent.js')
-      const result = await getPairingsFn(food)
-      
-      return result
-    } catch (error) {
-      setError(error.message)
-      throw error
+      const data = await _backendPost('/api/food-pairings', { food })
+      let pairings = data.pairings
+      if (typeof pairings === 'string') {
+        try { pairings = JSON.parse(pairings) } catch { /* keep as text */ }
+      }
+      return { food, pairings: Array.isArray(pairings) ? pairings : [{ name: 'Pairing', description: pairings }] }
+    } catch (err) {
+      setError(err.message)
+      throw err
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [_backendPost])
 
   const calculateEnvironmentalImpact = useCallback(async (foodType, quantity, unit) => {
     try {
       setIsLoading(true)
       setError(null)
-      
-      const { calculateEnvironmentalImpact: calculateFn } = await import('../aiAgent.js')
-      const result = await calculateFn(foodType, quantity, unit)
-      
-      return result
-    } catch (error) {
-      setError(error.message)
-      throw error
+      const data = await _backendPost('/api/impact', { food_type: foodType, quantity, unit })
+      return {
+        foodType,
+        quantity,
+        unit,
+        waterSaved: `${data.water_saved_litres} litres`,
+        co2Prevented: `${data.co2_prevented_kg} kg`,
+        landSaved: `${data.land_saved_m2} m²`,
+        equivalents: {
+          carMiles: `${data.equivalents?.car_km_avoided} km`,
+          showerMinutes: `${data.equivalents?.showers_saved} showers`,
+        },
+      }
+    } catch (err) {
+      setError(err.message)
+      throw err
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [_backendPost])
 
   return {
     isLoading,

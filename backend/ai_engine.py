@@ -610,6 +610,60 @@ def _build_system_prompt(training_data: dict) -> str:
             f"## Spanish Response Guidelines\n{training_data['spanish_guidelines']}"
         )
 
+    if "community_resources" in training_data:
+        cr = training_data["community_resources"]
+        cr_text = cr.get("description", "")
+        if "national_hotlines" in cr:
+            cr_text += "\n\nNational hotlines:\n" + "\n".join(f"- {h}" for h in cr["national_hotlines"])
+        if "programs" in cr:
+            cr_text += "\n\nAvailable programs:\n" + "\n".join(f"- {p}" for p in cr["programs"])
+        if "guidance" in cr:
+            cr_text += f"\n\n{cr['guidance']}"
+        sections.append(f"## Community Food Resources\n{cr_text}")
+
+    # Capabilities summary
+    sections.append(
+        "## Your Capabilities\n"
+        "You have these tools available:\n"
+        "- **search_food_near_user**: Find food listings near a location\n"
+        "- **suggest_recipes**: Generate recipes from ingredients\n"
+        "- **get_storage_tips**: Get food storage and preservation advice\n"
+        "- **find_community_resources**: Find food banks, pantries, SNAP/WIC offices nearby\n"
+        "- **analyze_food_image**: Analyze food photos (identify, recipes, safety, nutrition, labels)\n"
+        "- **check_benefits_eligibility**: Check SNAP, WIC, school meals, TEFAP, CSFP, Meals on Wheels eligibility\n"
+        "- **create_emergency_food_request**: Create urgent food request when someone needs food immediately\n"
+        "- **generate_meal_plan**: Create budget-friendly weekly meal plans for families\n"
+        "- **analyze_nutrition**: Analyze meal nutrition, find gaps, suggest affordable supplements\n"
+        "- **get_food_preservation_guide**: Detailed canning, freezing, dehydrating instructions\n"
+        "- **find_child_senior_programs**: School meals, summer feeding, Head Start, Meals on Wheels, CSFP\n"
+        "- **check_food_safety**: Check if food is safe to eat, allergens, handling guidance\n"
+        "- **find_dietary_alternatives**: Find allergen-safe, religious, medical diet substitutes\n"
+        "- **get_user_profile**: Look up user information\n"
+        "- **get_pickup_schedule**: Check upcoming food pickups\n"
+        "- **create_reminder**: Set reminders for pickups or events\n"
+        "- **get_mapbox_route**: Get walking/driving directions\n"
+        "- **query_distribution_centers**: Find food distribution events\n"
+        "- **get_user_dashboard**: Get user dashboard overview\n"
+        "- **check_pickup_schedule**: Check scheduled pickups\n"
+        "\n## CRITICAL HUNGER RESPONSE GUIDELINES\n"
+        "- When someone says they're hungry, need food, or can't afford food, treat it with urgency\n"
+        "- Immediately offer to search for food nearby AND share emergency resource hotlines\n"
+        "- If they have children, mention school meal programs and summer feeding sites\n"
+        "- If they have seniors, mention Meals on Wheels and CSFP\n"
+        "- Always mention that 211 is available 24/7 for food assistance referrals\n"
+        "- Check benefits eligibility proactively when income/family info is shared\n"
+        "- Never make anyone feel ashamed for needing food — this is a community helping community\n"
+        "- SNAP and WIC do NOT check immigration status at the federal level\n"
+        "- Most food banks require NO ID and NO proof of income\n"
+        "- For immediate crisis: call 211 or National Hunger Hotline 1-866-348-6479\n"
+        "\nAlways use the appropriate tool when a user's question can be answered with real data. "
+        "For food-insecure users, proactively share community resources and national hotline numbers.\n\n"
+        "## IMPORTANT OUTPUT RULES\n"
+        "- NEVER output XML, DSML, function_call tags, or any markup in your responses.\n"
+        "- Use ONLY the built-in tool calling API to invoke tools — never write tool calls as text.\n"
+        "- Your responses must be plain natural language, formatted with markdown when appropriate."
+    )
+
     base = training_data.get(
         "system_base",
         "You are DoGoods AI Assistant, a warm and helpful community food sharing assistant.",
@@ -710,6 +764,8 @@ class ConversationEngine:
         user_id: str,
         message: str,
         include_audio: bool = False,
+        latitude: float | None = None,
+        longitude: float | None = None,
     ) -> dict:
         """
         Full conversation flow:
@@ -762,6 +818,18 @@ class ConversationEngine:
             )
             messages.append({"role": "system", "content": context})
 
+        # Inject user location if available
+        if latitude is not None and longitude is not None:
+            messages.append({
+                "role": "system",
+                "content": (
+                    f"User's current location: latitude={latitude}, longitude={longitude}. "
+                    "When calling location-based tools (search_food_near_user, "
+                    "query_distribution_centers, find_community_resources, "
+                    "get_mapbox_route), use these coordinates for the user's position."
+                ),
+            })
+
         for msg in history:
             messages.append({"role": msg["role"], "content": msg["message"]})
 
@@ -795,48 +863,131 @@ class ConversationEngine:
     async def _call_with_fallbacks(
         self, messages: list[dict], lang: str = "en"
     ) -> str:
-        """Try GPT-4o; on failure fall back to text-only canned responses."""
-        # Attempt 1: Full GPT-4o with tool calling
+        """Try AI chat with tool calling; fall back to canned responses."""
         try:
-            return await self._call_openai_chat(messages, lang=lang)
+            return await self._call_ai_chat(messages, lang=lang)
         except httpx.TimeoutException:
-            logger.warning("GPT-4o timed out — returning canned timeout response")
+            logger.warning("AI chat timed out — returning canned timeout response")
             return get_canned_response("timeout", lang)
         except httpx.HTTPStatusError as exc:
-            logger.error("GPT-4o HTTP error %s", exc.response.status_code)
+            logger.error("AI chat HTTP error %s", exc.response.status_code)
             return get_canned_response("api_down", lang)
         except RuntimeError as exc:
-            # e.g. "OPENAI_API_KEY not configured"
-            logger.error("GPT-4o runtime error: %s", exc)
+            logger.error("AI chat runtime error: %s", exc)
             return get_canned_response("api_down", lang)
         except Exception as exc:
-            logger.error("GPT-4o unexpected error: %s", exc)
+            logger.error("AI chat unexpected error: %s", exc)
             return get_canned_response("general_error", lang)
 
-    # ---- OpenAI chat completions with tool calling -----------------------
+    # ---- AI chat completions with tool calling ---------------------------
 
-    async def _call_openai_chat(
+    def _resolve_ai_config(self) -> tuple[str, str, str, list[dict]]:
+        """Determine which API key, base URL, model, and tools to use.
+
+        Priority: OpenAI (GPT-4o with full tool set including vision)
+                  → DeepSeek (deepseek-chat, vision tool excluded)
+        Returns: (api_key, base_url, model, tool_definitions)
+        """
+        if OPENAI_API_KEY:
+            return (
+                OPENAI_API_KEY,
+                OPENAI_BASE_URL,
+                CHAT_MODEL,
+                self.tool_definitions,
+            )
+        if DEEPSEEK_API_KEY:
+            # DeepSeek supports tool calling but not vision
+            tools = [
+                t for t in self.tool_definitions
+                if t.get("function", {}).get("name") != "analyze_food_image"
+            ]
+            return (
+                DEEPSEEK_API_KEY,
+                DEEPSEEK_BASE_URL,
+                DEFAULT_MODEL,
+                tools,
+            )
+        raise RuntimeError(
+            "No AI API key configured. Set OPENAI_API_KEY or DEEPSEEK_API_KEY."
+        )
+
+    # ---- Response sanitization (strip leaked DeepSeek tool markup) ------
+
+    _DSML_BLOCK_RE = re.compile(
+        r"<[｜\|]?DSML[｜\|]?function_calls>.*?</[｜\|]?DSML[｜\|]?function_calls>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    _GENERIC_FNCALL_RE = re.compile(
+        r"<function_calls?>.*?</function_calls?>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    _DSML_TOOL_RE = re.compile(
+        r'<[｜\|]?DSML[｜\|]?invoke\s+name="(?P<name>[^"]+)">'
+        r'(?P<params>.*?)'
+        r'</[｜\|]?DSML[｜\|]?invoke>',
+        re.DOTALL | re.IGNORECASE,
+    )
+    _DSML_PARAM_RE = re.compile(
+        r'<[｜\|]?DSML[｜\|]?parameter\s+name="(?P<key>[^"]+)"[^>]*>'
+        r'(?P<val>.*?)'
+        r'</[｜\|]?DSML[｜\|]?parameter>',
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    def _extract_leaked_tool_calls(self, text: str) -> list[dict]:
+        """Parse DeepSeek's leaked DSML markup into structured tool calls."""
+        calls = []
+        for m in self._DSML_TOOL_RE.finditer(text):
+            fn_name = m.group("name")
+            params_raw = m.group("params")
+            args = {}
+            for pm in self._DSML_PARAM_RE.finditer(params_raw):
+                key = pm.group("key")
+                val = pm.group("val").strip()
+                # Try to parse numeric values
+                if val.replace(".", "", 1).replace("-", "", 1).isdigit():
+                    try:
+                        val = float(val) if "." in val else int(val)
+                    except ValueError:
+                        pass
+                elif val.lower() in ("true", "false"):
+                    val = val.lower() == "true"
+                args[key] = val
+            calls.append({"name": fn_name, "arguments": args})
+        return calls
+
+    def _sanitize_response(self, text: str | None) -> str:
+        """Strip any leaked DSML / function_call XML from response text."""
+        if not text:
+            return ""
+        cleaned = self._DSML_BLOCK_RE.sub("", text)
+        cleaned = self._GENERIC_FNCALL_RE.sub("", cleaned)
+        return cleaned.strip()
+
+    async def _call_ai_chat(
         self, messages: list[dict], lang: str = "en"
     ) -> str:
-        """Call GPT-4o, handle tool calls, return final assistant text."""
-        if not OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY not configured")
+        """Call the AI chat API with tool calling support.
+
+        Works with either OpenAI (GPT-4o) or DeepSeek (deepseek-chat).
+        """
+        api_key, base_url, model, tools = self._resolve_ai_config()
 
         payload = {
-            "model": CHAT_MODEL,
+            "model": model,
             "messages": messages,
-            "tools": self.tool_definitions,
+            "tools": tools,
             "temperature": 0.7,
             "max_tokens": 1024,
         }
         headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
 
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             resp = await client.post(
-                f"{OPENAI_BASE_URL}/chat/completions",
+                f"{base_url}/chat/completions",
                 json=payload,
                 headers=headers,
             )
@@ -866,7 +1017,6 @@ class ConversationEngine:
                     result = await self._execute_tool(fn_name, fn_args)
                 except Exception as tool_exc:
                     logger.error("Tool %s failed: %s", fn_name, tool_exc)
-                    # Graceful tool error — feed error context back to GPT
                     result = {
                         "error": True,
                         "message": (
@@ -883,7 +1033,7 @@ class ConversationEngine:
 
             # Follow-up call with tool results (no tools this time)
             followup_payload = {
-                "model": CHAT_MODEL,
+                "model": model,
                 "messages": messages,
                 "temperature": 0.7,
                 "max_tokens": 1024,
@@ -891,18 +1041,78 @@ class ConversationEngine:
             try:
                 async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
                     resp = await client.post(
-                        f"{OPENAI_BASE_URL}/chat/completions",
+                        f"{base_url}/chat/completions",
                         json=followup_payload,
                         headers=headers,
                     )
                     resp.raise_for_status()
                     data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                return self._sanitize_response(data["choices"][0]["message"]["content"])
             except Exception as followup_exc:
-                logger.error("GPT-4o follow-up failed: %s", followup_exc)
+                logger.error("AI follow-up call failed: %s", followup_exc)
                 return get_canned_response("tool_error", lang)
 
-        return msg["content"]
+        # Check for leaked DSML tool-call markup in plain text response
+        content = msg.get("content") or ""
+        leaked_calls = self._extract_leaked_tool_calls(content)
+        if leaked_calls:
+            logger.warning(
+                "DeepSeek leaked %d tool call(s) as text — executing them",
+                len(leaked_calls),
+            )
+            # Execute the leaked tool calls
+            tool_results = {}
+            for lc in leaked_calls:
+                fn_name = lc["name"]
+                fn_args = lc["arguments"]
+                try:
+                    result = await self._execute_tool(fn_name, fn_args)
+                except Exception as tool_exc:
+                    logger.error("Leaked tool %s failed: %s", fn_name, tool_exc)
+                    result = {
+                        "error": True,
+                        "message": f"The {fn_name} tool encountered an error.",
+                    }
+                tool_results[fn_name] = result
+
+            # Inject results as a system message and ask for a clean answer
+            results_text = json.dumps(tool_results, default=str)
+            messages.append({
+                "role": "system",
+                "content": (
+                    "You attempted to call tools but the calls appeared in text "
+                    "instead of using the API properly. The tools have been "
+                    "executed for you. Here are the results — use them to give "
+                    "the user a helpful, natural-language answer. Do NOT output "
+                    "any XML, DSML, or function_call markup.\n\n"
+                    f"Tool results: {results_text}"
+                ),
+            })
+
+            # Follow-up call to get a clean natural-language answer
+            followup_payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.7,
+                "max_tokens": 1024,
+            }
+            try:
+                async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+                    resp = await client.post(
+                        f"{base_url}/chat/completions",
+                        json=followup_payload,
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                return self._sanitize_response(data["choices"][0]["message"]["content"])
+            except Exception as followup_exc:
+                logger.error("Leaked-tool follow-up failed: %s", followup_exc)
+                # Return the cleaned original text (without DSML tags)
+                cleaned = self._sanitize_response(content)
+                return cleaned if cleaned else get_canned_response("tool_error", lang)
+
+        return self._sanitize_response(content)
 
     # ---- Whisper speech-to-text ------------------------------------------
 

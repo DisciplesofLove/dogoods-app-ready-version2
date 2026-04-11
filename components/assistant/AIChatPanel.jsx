@@ -6,20 +6,40 @@ import { textToSpeech, playAudioBlob, transcribeAudio } from '../../utils/openai
 
 // ─── Quick action presets ─────────────────────────────
 const QUICK_ACTIONS_EN = [
+  { label: '� I need food now', message: 'I need food urgently for my family. Can you help me find food immediately?' },
   { label: '🔍 Find food near me', message: 'What food is available near me?' },
-  { label: '📦 My pickups', message: 'What are my upcoming pickups?' },
+  { label: '🏛️ Check SNAP/WIC eligibility', message: 'Can you check if I qualify for SNAP, WIC, or other food assistance programs?' },
+  { label: '📋 Budget meal plan', message: 'Create a budget-friendly meal plan for my family' },
   { label: '🍳 Suggest a recipe', message: 'Can you suggest a recipe from available food?' },
+  { label: '🏦 Food banks nearby', message: 'Find food banks and community resources near me' },
+  { label: '👶 Kids meal programs', message: 'What food programs are available for children?' },
+  { label: '👴 Senior food help', message: 'What food programs are available for seniors 60+?' },
+  { label: '📷 Identify food', message: 'I want to send a photo of food for identification' },
+  { label: '🧊 Storage tips', message: 'How should I store fresh produce to keep it longer?' },
+  { label: '🥫 Preserve bulk food', message: 'I got a lot of food from the food bank. How do I preserve it?' },
+  { label: '⚠️ Is this food safe?', message: 'I need to check if some food is still safe to eat' },
+  { label: '🍽️ Nutrition check', message: 'Can you analyze the nutrition of what I\'ve been eating?' },
+  { label: '🔄 Allergy alternatives', message: 'I need food alternatives for dietary restrictions' },
   { label: '🤝 Share food', message: 'I want to share some food' },
-  { label: '📅 Upcoming events', message: 'What distribution events are coming up?' },
   { label: '❓ How it works', message: 'How does DoGoods work?' },
 ]
 
 const QUICK_ACTIONS_ES = [
+  { label: '🚨 Necesito comida', message: 'Necesito comida urgentemente para mi familia. ¿Pueden ayudarme a encontrar comida ahora?' },
   { label: '🔍 Buscar comida', message: '¿Qué comida hay disponible cerca de mí?' },
-  { label: '📦 Mis recogidas', message: '¿Cuáles son mis próximas recogidas?' },
+  { label: '🏛️ Verificar elegibilidad SNAP/WIC', message: '¿Puedo verificar si califico para SNAP, WIC u otros programas de asistencia alimentaria?' },
+  { label: '📋 Plan de comidas económico', message: 'Crear un plan de comidas económico para mi familia' },
   { label: '🍳 Sugerir receta', message: '¿Puedes sugerirme una receta con comida disponible?' },
+  { label: '🏦 Bancos de comida', message: 'Buscar bancos de comida y recursos comunitarios cerca de mí' },
+  { label: '👶 Programas para niños', message: '¿Qué programas de comida hay para niños?' },
+  { label: '👴 Ayuda para mayores', message: '¿Qué programas de comida hay para personas mayores de 60 años?' },
+  { label: '📷 Identificar comida', message: 'Quiero enviar una foto de comida para identificarla' },
+  { label: '🧊 Consejos de almacenamiento', message: '¿Cómo debo almacenar los productos frescos?' },
+  { label: '🥫 Conservar alimentos', message: 'Recibí mucha comida del banco de alimentos. ¿Cómo la conservo?' },
+  { label: '⚠️ ¿Es segura esta comida?', message: 'Necesito verificar si una comida todavía es segura para comer' },
+  { label: '🍽️ Revisión nutricional', message: '¿Puedes analizar la nutrición de lo que he estado comiendo?' },
+  { label: '🔄 Alternativas para alergias', message: 'Necesito alternativas de alimentos para restricciones dietéticas' },
   { label: '🤝 Compartir comida', message: 'Quiero compartir comida' },
-  { label: '📅 Eventos', message: '¿Qué eventos de distribución hay próximamente?' },
   { label: '❓ Cómo funciona', message: '¿Cómo funciona DoGoods?' },
 ]
 
@@ -92,6 +112,372 @@ function ToolResultCard({ toolResult }) {
     )
   }
 
+  // ─── Recipe results ──────────────────────────────
+  if (tool === 'suggest_recipes' && result?.recipes?.length > 0) {
+    return (
+      <div className="mt-2 space-y-2">
+        {result.recipes.map((recipe, i) => (
+          <details key={i} className="bg-amber-900/20 border border-amber-500/30 rounded-lg backdrop-blur-sm group">
+            <summary className="px-3 py-2 cursor-pointer text-amber-300 font-medium text-sm flex items-center gap-2">
+              <span>🍳</span>
+              <span className="flex-1">{recipe.name || `Recipe ${i + 1}`}</span>
+              {recipe.difficulty && <span className="text-xs text-amber-400/60">{recipe.difficulty}</span>}
+              {recipe.prepTime && <span className="text-xs text-amber-400/60">⏱ {recipe.prepTime}</span>}
+            </summary>
+            <div className="px-3 pb-3 text-sm space-y-2">
+              {recipe.servings && <div className="text-amber-400/70 text-xs">Serves {recipe.servings}{recipe.cookTime ? ` · Cook: ${recipe.cookTime}` : ''}</div>}
+              {recipe.ingredients?.length > 0 && (
+                <div>
+                  <div className="text-amber-300/80 text-xs font-medium mb-1">Ingredients:</div>
+                  <ul className="list-disc pl-4 text-slate-300 text-xs space-y-0.5">
+                    {recipe.ingredients.map((ing, j) => <li key={j}>{ing}</li>)}
+                  </ul>
+                </div>
+              )}
+              {recipe.instructions && (
+                <div>
+                  <div className="text-amber-300/80 text-xs font-medium mb-1">Instructions:</div>
+                  <p className="text-slate-300 text-xs whitespace-pre-line">{recipe.instructions}</p>
+                </div>
+              )}
+            </div>
+          </details>
+        ))}
+      </div>
+    )
+  }
+
+  // ─── Storage tips ────────────────────────────────
+  if (tool === 'get_storage_tips' && result?.storage_info) {
+    const info = result.storage_info
+    return (
+      <div className="mt-2 bg-blue-900/20 border border-blue-400/30 rounded-lg p-3 text-sm backdrop-blur-sm">
+        <div className="text-blue-300 font-medium mb-1">🧊 Storage Tips: {info.food || ''}</div>
+        {info.shelf_life && (
+          <div className="text-blue-400/70 text-xs mb-1">
+            {info.shelf_life.fridge && `Fridge: ${info.shelf_life.fridge}`}
+            {info.shelf_life.freezer && ` · Freezer: ${info.shelf_life.freezer}`}
+            {info.shelf_life.pantry && ` · Pantry: ${info.shelf_life.pantry}`}
+          </div>
+        )}
+        {info.tips?.length > 0 && (
+          <ul className="list-disc pl-4 text-slate-300 text-xs space-y-0.5 mt-1">
+            {info.tips.map((tip, i) => <li key={i}>{tip}</li>)}
+          </ul>
+        )}
+      </div>
+    )
+  }
+
+  // ─── Community resources ─────────────────────────
+  if (tool === 'find_community_resources' && result?.resources?.length > 0) {
+    return (
+      <div className="mt-2 space-y-2">
+        {result.resources.slice(0, 5).map((r, i) => (
+          <div key={r.id || i} className="bg-purple-900/20 border border-purple-400/30 rounded-lg p-3 text-sm backdrop-blur-sm">
+            <div className="text-purple-300 font-medium">{r.name}</div>
+            <div className="text-purple-400/70 text-xs mt-0.5">
+              📍 {r.address}{r.distance_km != null && ` · ${r.distance_km} km away`}
+            </div>
+            {r.phone && <div className="text-purple-400/60 text-xs">📞 {r.phone}</div>}
+            {r.services && <div className="text-slate-400 text-xs mt-0.5">{r.services}</div>}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // ─── Benefits eligibility ──────────────────────────
+  if (tool === 'check_benefits_eligibility' && result?.programs?.length > 0) {
+    return (
+      <div className="mt-2 space-y-2">
+        <div className="text-xs text-slate-400 mb-1">
+          Income: ~{result.income_as_pct_fpl}% of Federal Poverty Level
+        </div>
+        {result.programs.map((p, i) => (
+          <div key={i} className="bg-indigo-900/20 border border-indigo-400/30 rounded-lg p-3 text-sm backdrop-blur-sm">
+            <div className="flex items-center gap-2">
+              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                p.eligible === 'likely' ? 'bg-green-500/20 text-green-300 border border-green-500/20' :
+                p.eligible === 'possible' ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/20' :
+                'bg-red-500/20 text-red-300 border border-red-500/20'
+              }`}>
+                {p.eligible === 'likely' ? '✅ Likely eligible' : p.eligible === 'possible' ? '⚠️ Possibly eligible' : '❌ Unlikely'}
+              </span>
+              <span className="text-indigo-300 font-medium flex-1">{p.name}</span>
+            </div>
+            <div className="text-slate-400 text-xs mt-1">{p.reason}</div>
+            {p.benefits && <div className="text-indigo-400/70 text-xs mt-1">📦 {p.benefits}</div>}
+            {p.monthly_benefit_estimate && p.monthly_benefit_estimate !== 'N/A' && (
+              <div className="text-green-400/80 text-xs mt-1">💰 Estimated: {p.monthly_benefit_estimate}</div>
+            )}
+            {p.how_to_apply && <div className="text-cyan-400/70 text-xs mt-1">📝 {p.how_to_apply}</div>}
+          </div>
+        ))}
+        {result.hotlines?.length > 0 && (
+          <div className="bg-slate-800/50 border border-slate-600/30 rounded-lg p-2 text-xs text-slate-400">
+            <div className="font-medium text-slate-300 mb-1">📞 Need help applying?</div>
+            {result.hotlines.map((h, i) => (
+              <div key={i}>{h.name}: <span className="text-cyan-400">{h.number}</span> ({h.hours})</div>
+            ))}
+          </div>
+        )}
+        {result.disclaimer && (
+          <div className="text-[10px] text-slate-500 italic">{result.disclaimer}</div>
+        )}
+      </div>
+    )
+  }
+
+  // ─── Emergency food request ────────────────────────
+  if (tool === 'create_emergency_food_request' && result) {
+    return (
+      <div className="mt-2 space-y-2">
+        <div className="bg-red-900/30 border border-red-500/30 rounded-lg p-3 text-sm backdrop-blur-sm">
+          <div className="text-red-300 font-medium">🚨 Emergency Food Request Created</div>
+          <div className="text-red-400/70 text-xs mt-1">
+            Urgency: {result.urgency_level} · Family size: {result.family_size}
+          </div>
+        </div>
+
+        {result.available_food_nearby?.length > 0 && (
+          <div>
+            <div className="text-xs text-emerald-300 font-medium mb-1">🍽️ Available food near you:</div>
+            {result.available_food_nearby.map((f, i) => (
+              <div key={i} className="bg-emerald-900/20 border border-emerald-500/30 rounded-lg p-2 text-xs mb-1 backdrop-blur-sm">
+                <div className="text-emerald-300 font-medium">{f.title}</div>
+                <div className="text-emerald-400/60">
+                  {f.quantity && `${f.quantity} · `}{f.address}
+                  {f.distance_km != null && ` · ${f.distance_km} km`}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {result.immediate_resources?.length > 0 && (
+          <div className="bg-amber-900/20 border border-amber-500/30 rounded-lg p-3 text-sm backdrop-blur-sm">
+            <div className="text-amber-300 font-medium mb-1">📞 Call now for immediate help:</div>
+            {result.immediate_resources.map((r, i) => (
+              <div key={i} className="text-xs text-slate-300 mb-1">
+                <span className="text-amber-300">{r.name}</span>: <span className="text-cyan-400">{r.contact}</span>
+                {r.hours && <span className="text-slate-500"> ({r.hours})</span>}
+                {r.action && <div className="text-slate-400 ml-2">→ {r.action}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ─── Meal plan ─────────────────────────────────────
+  if (tool === 'generate_meal_plan' && (result?.meal_plan || result?.meal_plan_text)) {
+    return (
+      <div className="mt-2 space-y-2">
+        {result.budget_summary && (
+          <div className="bg-green-900/20 border border-green-500/30 rounded-lg p-2 text-xs backdrop-blur-sm">
+            <span className="text-green-300 font-medium">💰 Budget:</span>
+            <span className="text-green-400/70 ml-1">
+              {result.budget_summary.per_person_per_day}/person/day · {result.budget_summary.total_daily}/day total · Family of {result.budget_summary.family_size}
+            </span>
+          </div>
+        )}
+        {result.meal_plan?.length > 0 && result.meal_plan.map((day, i) => (
+          <details key={i} className="bg-teal-900/20 border border-teal-500/30 rounded-lg backdrop-blur-sm group">
+            <summary className="px-3 py-2 cursor-pointer text-teal-300 font-medium text-sm">
+              📅 Day {day.day}
+            </summary>
+            <div className="px-3 pb-2 text-xs space-y-1">
+              {day.breakfast && <div><span className="text-teal-400">🌅 Breakfast:</span> <span className="text-slate-300">{day.breakfast}</span></div>}
+              {day.lunch && <div><span className="text-teal-400">☀️ Lunch:</span> <span className="text-slate-300">{day.lunch}</span></div>}
+              {day.dinner && <div><span className="text-teal-400">🌙 Dinner:</span> <span className="text-slate-300">{day.dinner}</span></div>}
+              {day.snacks && <div><span className="text-teal-400">🍎 Snacks:</span> <span className="text-slate-300">{day.snacks}</span></div>}
+            </div>
+          </details>
+        ))}
+        {result.grocery_list?.length > 0 && (
+          <details className="bg-teal-900/20 border border-teal-500/30 rounded-lg backdrop-blur-sm">
+            <summary className="px-3 py-2 cursor-pointer text-teal-300 font-medium text-sm">
+              🛒 Grocery List ({result.grocery_list.length} items){result.total_estimated_cost && ` · ${result.total_estimated_cost}`}
+            </summary>
+            <div className="px-3 pb-2 text-xs space-y-0.5">
+              {result.grocery_list.map((item, i) => (
+                <div key={i} className="flex items-center gap-1 text-slate-300">
+                  <span>{item.food_bank_available ? '🏦' : '🛒'}</span>
+                  <span className="flex-1">{item.item} ({item.quantity})</span>
+                  <span className="text-teal-400/60">{item.est_cost}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+        {result.batch_cooking_tips?.length > 0 && (
+          <div className="bg-slate-800/50 border border-slate-600/30 rounded-lg p-2 text-xs text-slate-400">
+            <div className="text-teal-300 font-medium mb-1">👩‍🍳 Batch cooking tips:</div>
+            <ul className="list-disc pl-4 space-y-0.5">
+              {result.batch_cooking_tips.map((tip, i) => <li key={i}>{tip}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ─── Nutrition analysis ────────────────────────────
+  if (tool === 'analyze_nutrition' && (result?.totals || result?.gaps)) {
+    return (
+      <div className="mt-2 space-y-2">
+        {result.totals && (
+          <div className="bg-green-900/20 border border-green-500/30 rounded-lg p-3 text-sm backdrop-blur-sm">
+            <div className="text-green-300 font-medium mb-1">🍽️ Nutrition Summary</div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="text-center">
+                <div className="text-green-400 font-bold">{result.totals.calories}</div>
+                <div className="text-slate-400">Calories</div>
+              </div>
+              <div className="text-center">
+                <div className="text-blue-400 font-bold">{result.totals.protein_g}g</div>
+                <div className="text-slate-400">Protein</div>
+              </div>
+              <div className="text-center">
+                <div className="text-amber-400 font-bold">{result.totals.carbs_g}g</div>
+                <div className="text-slate-400">Carbs</div>
+              </div>
+            </div>
+          </div>
+        )}
+        {result.gaps?.length > 0 && (
+          <div className="bg-amber-900/20 border border-amber-500/30 rounded-lg p-3 text-sm backdrop-blur-sm">
+            <div className="text-amber-300 font-medium mb-1">⚠️ Nutritional Gaps</div>
+            {result.gaps.map((gap, i) => (
+              <div key={i} className="text-xs mb-1">
+                <span className={`px-1 py-0.5 rounded ${gap.status === 'deficient' ? 'bg-red-500/20 text-red-300' : 'bg-yellow-500/20 text-yellow-300'}`}>
+                  {gap.nutrient}: {gap.status}
+                </span>
+                {gap.affordable_sources?.length > 0 && (
+                  <div className="text-slate-400 ml-2 mt-0.5">
+                    Affordable sources: {gap.affordable_sources.join(', ')}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {result.overall_assessment && (
+          <div className="text-xs text-slate-400 italic">{result.overall_assessment}</div>
+        )}
+      </div>
+    )
+  }
+
+  // ─── Food safety check ─────────────────────────────
+  if (tool === 'check_food_safety' && result?.safety_verdict) {
+    const verdictColors = {
+      safe: 'bg-green-500/20 text-green-300 border-green-500/30',
+      caution: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+      unsafe: 'bg-red-500/20 text-red-300 border-red-500/30',
+    }
+    const verdictEmoji = { safe: '✅', caution: '⚠️', unsafe: '🚫' }
+    return (
+      <div className="mt-2">
+        <div className={`border rounded-lg p-3 text-sm backdrop-blur-sm ${verdictColors[result.safety_verdict] || verdictColors.caution}`}>
+          <div className="font-medium mb-1">
+            {verdictEmoji[result.safety_verdict] || '⚠️'} {result.food}: {result.safety_verdict?.toUpperCase()}
+          </div>
+          {result.explanation && <div className="text-xs opacity-80">{result.explanation}</div>}
+          {result.spoilage_signs?.length > 0 && (
+            <div className="mt-1 text-xs">
+              <span className="font-medium">Watch for:</span> {result.spoilage_signs.join(', ')}
+            </div>
+          )}
+          {result.common_allergens?.length > 0 && (
+            <div className="mt-1 text-xs">
+              <span className="font-medium">Allergens:</span> {result.common_allergens.join(', ')}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ─── Child/senior programs ─────────────────────────
+  if (tool === 'find_child_senior_programs' && result?.programs?.length > 0) {
+    return (
+      <div className="mt-2 space-y-2">
+        {result.programs.map((p, i) => (
+          <div key={i} className="bg-pink-900/20 border border-pink-400/30 rounded-lg p-3 text-sm backdrop-blur-sm">
+            <div className="text-pink-300 font-medium">{p.name}</div>
+            <div className="text-pink-400/60 text-xs mt-0.5">{p.age_range}</div>
+            {p.benefits && <div className="text-slate-300 text-xs mt-1">📦 {p.benefits}</div>}
+            {p.eligibility && <div className="text-slate-400 text-xs mt-0.5">✓ {p.eligibility}</div>}
+            {(p.how_to_apply || p.how_to_find) && (
+              <div className="text-cyan-400/70 text-xs mt-1">📝 {p.how_to_apply || p.how_to_find}</div>
+            )}
+            {p.note && <div className="text-green-400/70 text-xs mt-1 italic">💡 {p.note}</div>}
+          </div>
+        ))}
+        {result.note && <div className="text-xs text-green-400/70 italic">🔒 {result.note}</div>}
+      </div>
+    )
+  }
+
+  // ─── Food preservation guide ───────────────────────
+  if (tool === 'get_food_preservation_guide' && (result?.methods || result?.guide_text)) {
+    return (
+      <div className="mt-2 space-y-2">
+        {result.methods?.map((m, i) => (
+          <details key={i} className="bg-orange-900/20 border border-orange-500/30 rounded-lg backdrop-blur-sm group">
+            <summary className="px-3 py-2 cursor-pointer text-orange-300 font-medium text-sm flex items-center gap-2">
+              <span>🥫</span>
+              <span className="flex-1 capitalize">{m.method}</span>
+              <span className="text-xs text-orange-400/60">{m.shelf_life}</span>
+              {m.difficulty && <span className="text-xs text-orange-400/40">{m.difficulty}</span>}
+            </summary>
+            <div className="px-3 pb-3 text-xs space-y-1">
+              {m.equipment_needed?.length > 0 && (
+                <div className="text-orange-400/70">Equipment: {m.equipment_needed.join(', ')}</div>
+              )}
+              {m.steps?.length > 0 && (
+                <ol className="list-decimal pl-4 text-slate-300 space-y-0.5">
+                  {m.steps.map((step, j) => <li key={j}>{step}</li>)}
+                </ol>
+              )}
+            </div>
+          </details>
+        ))}
+        {result.safety_warnings?.length > 0 && (
+          <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-2 text-xs text-red-300">
+            ⚠️ {result.safety_warnings.join(' ')}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ─── Dietary alternatives ──────────────────────────
+  if (tool === 'find_dietary_alternatives' && result?.alternatives?.length > 0) {
+    return (
+      <div className="mt-2 space-y-2">
+        <div className="text-xs text-slate-400">
+          Alternatives for <span className="text-slate-200">{result.original}</span> ({result.restrictions?.join(', ')})
+        </div>
+        {result.alternatives.map((alt, i) => (
+          <div key={i} className="bg-violet-900/20 border border-violet-400/30 rounded-lg p-3 text-sm backdrop-blur-sm">
+            <div className="text-violet-300 font-medium">{alt.name}</div>
+            {alt.usage && <div className="text-slate-300 text-xs mt-1">📝 {alt.usage}</div>}
+            {alt.cost_estimate && <div className="text-green-400/70 text-xs mt-0.5">💰 {alt.cost_estimate}</div>}
+            {alt.where_to_find && <div className="text-slate-400 text-xs mt-0.5">🏪 {alt.where_to_find}</div>}
+            {alt.nutrition_note && <div className="text-cyan-400/60 text-xs mt-0.5">🥗 {alt.nutrition_note}</div>}
+          </div>
+        ))}
+        {result.safety_note && (
+          <div className="text-xs text-amber-400/70 italic">⚠️ {result.safety_note}</div>
+        )}
+      </div>
+    )
+  }
+
   return null
 }
 
@@ -131,6 +517,10 @@ function MessageBubble({ msg, onFeedback, language }) {
             }`}
           >
             <p className="whitespace-pre-wrap">{msg.message}</p>
+            {/* Show image thumbnail if this message has one */}
+            {msg.imageUrl && (
+              <img src={msg.imageUrl} alt="Food" className="mt-2 rounded-lg max-w-full max-h-40 object-contain border border-white/10" />
+            )}
           </div>
 
           {/* Tool result cards */}
@@ -223,6 +613,7 @@ function AIChatPanel() {
   const {
     messages,
     sendMessage,
+    sendImage,
     isLoading,
     error,
     language,
@@ -240,6 +631,8 @@ function AIChatPanel() {
   const [isVoiceSpeaking, setIsVoiceSpeaking] = useState(false)
   const [voiceError, setVoiceError] = useState(null)
   const [voiceTranscript, setVoiceTranscript] = useState('')
+  const [imagePreview, setImagePreview] = useState(null)
+  const [imageAnalysisType, setImageAnalysisType] = useState('identify')
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const panelRef = useRef(null)
@@ -253,6 +646,7 @@ function AIChatPanel() {
   const analyserRef = useRef(null)
   const silenceTimerRef = useRef(null)
   const vadFrameRef = useRef(null)
+  const imageInputRef = useRef(null)
 
   // Keep sendMessage ref current to avoid stale closures
   useEffect(() => { sendMessageRef.current = sendMessage }, [sendMessage])
@@ -302,6 +696,42 @@ function AIChatPanel() {
   const handleQuickAction = useCallback((msg) => {
     sendMessage(msg)
   }, [sendMessage])
+
+  // ─── Image upload handler ──────────────────────────────
+  const handleImageSelect = useCallback((e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Max 10MB
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Image too large. Maximum size is 10MB.')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setImagePreview(ev.target.result) // base64 data URL
+    }
+    reader.readAsDataURL(file)
+    // Reset file input so same file can be selected again
+    e.target.value = ''
+  }, [])
+
+  const handleSendImage = useCallback(() => {
+    if (!imagePreview || isLoading) return
+    sendImage(imagePreview, {
+      analysisType: imageAnalysisType,
+      userQuestion: inputText.trim() || null,
+    })
+    setImagePreview(null)
+    setInputText('')
+    setImageAnalysisType('identify')
+  }, [imagePreview, imageAnalysisType, inputText, isLoading, sendImage])
+
+  const handleCancelImage = useCallback(() => {
+    setImagePreview(null)
+    setImageAnalysisType('identify')
+  }, [])
 
   // ─── Voice recording via MediaRecorder + Whisper STT ───────
   const stopRecording = useCallback(() => {
@@ -978,6 +1408,57 @@ function AIChatPanel() {
         </div>
       )}
 
+      {/* Hidden image input */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleImageSelect}
+        className="hidden"
+        aria-hidden="true"
+      />
+
+      {/* Image preview bar */}
+      {imagePreview && (
+        <div className="border-t border-cyan-500/20 px-3 py-2 bg-slate-800/80 backdrop-blur-sm flex items-start gap-2">
+          <div className="relative flex-shrink-0">
+            <img src={imagePreview} alt="Preview" className="w-16 h-16 rounded-lg object-cover border border-cyan-500/30" />
+            <button
+              type="button"
+              onClick={handleCancelImage}
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full text-white text-xs flex items-center justify-center hover:bg-red-400"
+              aria-label="Remove image"
+            >×</button>
+          </div>
+          <div className="flex-1 min-w-0">
+            <select
+              value={imageAnalysisType}
+              onChange={(e) => setImageAnalysisType(e.target.value)}
+              className="w-full text-xs bg-slate-700/60 border border-slate-600/50 text-slate-200 rounded-lg px-2 py-1 focus:border-cyan-500/50 outline-none"
+            >
+              <option value="identify">Identify food items</option>
+              <option value="recipe">Suggest recipes</option>
+              <option value="safety">Check safety</option>
+              <option value="nutrition">Nutrition info</option>
+              <option value="label">Read labels</option>
+            </select>
+            <p className="text-[10px] text-slate-500 mt-1">Add a question below or tap send</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSendImage}
+            disabled={isLoading}
+            className="p-2 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 shadow-md shadow-cyan-500/25 flex-shrink-0"
+            aria-label="Analyze image"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Input area */}
       <form onSubmit={handleSend} className="border-t border-cyan-500/20 px-3 py-2.5 flex items-end gap-2 flex-shrink-0 bg-slate-900/80 backdrop-blur-sm">
         <div className="flex-1 relative">
@@ -993,6 +1474,20 @@ function AIChatPanel() {
             aria-label="Message input"
           />
         </div>
+
+        {/* Camera / image upload button */}
+        <button
+          type="button"
+          onClick={() => imageInputRef.current?.click()}
+          disabled={isLoading}
+          className="p-2 rounded-full transition-all duration-200 text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10"
+          title={language === 'es' ? 'Enviar imagen de comida' : 'Send food image'}
+          aria-label="Upload food image"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
+          </svg>
+        </button>
 
         {/* Voice mode — AI speaks responses aloud */}
         <button

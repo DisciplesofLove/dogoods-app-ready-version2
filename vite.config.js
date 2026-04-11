@@ -22,7 +22,7 @@ export default defineConfig(({ mode }) => {
       open: true,
       historyApiFallback: true,
       proxy: {
-        '/api/ai': {
+        '/api': {
           target: 'http://localhost:8000',
           changeOrigin: true,
         },

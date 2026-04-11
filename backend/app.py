@@ -286,6 +286,8 @@ class AIChatRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=5000)
     include_audio: bool = False
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class AIChatResponse(BaseModel):
@@ -372,6 +374,8 @@ async def ai_chat(body: AIChatRequest, request: Request) -> dict:
             user_id=body.user_id,
             message=body.message,
             include_audio=body.include_audio,
+            latitude=body.latitude,
+            longitude=body.longitude,
         )
         return result
     except RuntimeError as exc:
@@ -657,6 +661,63 @@ async def ai_transcribe(
 
 
 # ===================================================================
+#  VISION ENDPOINT — Image analysis via GPT-4o
+# ===================================================================
+
+
+class VisionRequest(BaseModel):
+    image_url: str  # base64 data URL or public URL
+    analysis_type: str = "identify"  # identify | recipe | safety | nutrition | label
+    user_question: str | None = None
+    user_id: str | None = None
+
+    @field_validator("image_url")
+    @classmethod
+    def validate_image_url_size(cls, v: str) -> str:
+        # ~20MB max for base64 data URLs (covers ~15MB raw image)
+        if len(v) > 20 * 1024 * 1024:
+            raise ValueError("Image too large. Maximum encoded size is ~15MB.")
+        return v
+
+
+@app.post("/api/ai/vision")
+async def ai_vision(request: Request, body: VisionRequest) -> dict:
+    """Analyze a food image using GPT-4o vision."""
+    _enforce_rate_limit(request)
+
+    if not body.image_url:
+        raise HTTPException(400, "image_url is required")
+
+    allowed_types = {"identify", "recipe", "safety", "nutrition", "label"}
+    if body.analysis_type not in allowed_types:
+        raise HTTPException(400, f"Invalid analysis_type. Must be one of: {allowed_types}")
+
+    # Validate that the URL looks like a base64 data URL or a proper HTTPS URL
+    if not (
+        body.image_url.startswith("data:image/")
+        or body.image_url.startswith("https://")
+    ):
+        raise HTTPException(400, "image_url must be a data:image/... URL or https:// URL")
+
+    from backend.tools import _analyze_food_image
+
+    try:
+        result = await _analyze_food_image(
+            image_url=body.image_url,
+            analysis_type=body.analysis_type,
+            user_question=body.user_question,
+        )
+        return {
+            "response": result.get("summary", "Image analyzed."),
+            "analysis": result.get("analysis", {}),
+            "analysis_type": body.analysis_type,
+        }
+    except Exception as exc:
+        logger.error("Vision endpoint error: %s", exc)
+        raise HTTPException(500, "Image analysis failed") from exc
+
+
+# ===================================================================
 #  LEGACY ROUTES (preserved from original ai_engine.py)
 # ===================================================================
 
@@ -794,6 +855,163 @@ async def food_pairings(body: StorageRequest, request: Request) -> dict:
     except Exception as exc:
         logger.error("Food pairings error: %s", exc)
         raise HTTPException(500, "AI service unavailable") from exc
+
+
+# ===================================================================
+#  NEW HUNGER-FIGHTING ENDPOINTS
+# ===================================================================
+
+class BenefitsCheckRequest(BaseModel):
+    household_size: int = Field(ge=1, le=20)
+    monthly_income: float = Field(ge=0)
+    state: str | None = Field(default=None, max_length=2)
+    has_children_under_5: bool = False
+    has_school_age_children: bool = False
+    has_seniors_60_plus: bool = False
+    is_pregnant_or_postpartum: bool = False
+
+
+@app.post("/api/benefits/check-eligibility")
+async def check_benefits(body: BenefitsCheckRequest, request: Request) -> dict:
+    """Check eligibility for SNAP, WIC, school meals, TEFAP, CSFP, Meals on Wheels."""
+    _enforce_rate_limit(request)
+
+    from backend.tools import _check_benefits_eligibility
+
+    try:
+        result = await _check_benefits_eligibility(
+            household_size=body.household_size,
+            monthly_income=body.monthly_income,
+            state=body.state,
+            has_children_under_5=body.has_children_under_5,
+            has_school_age_children=body.has_school_age_children,
+            has_seniors_60_plus=body.has_seniors_60_plus,
+            is_pregnant_or_postpartum=body.is_pregnant_or_postpartum,
+        )
+        return result
+    except Exception as exc:
+        logger.error("Benefits check error: %s", exc)
+        raise HTTPException(500, "Benefits eligibility check failed") from exc
+
+
+class EmergencyFoodRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    urgency_level: str = Field(default="high", pattern=r"^(critical|high|moderate)$")
+    family_size: int = Field(default=1, ge=1, le=20)
+    dietary_needs: list[str] | None = None
+    message: str | None = Field(default=None, max_length=2000)
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+@app.post("/api/emergency-food")
+async def emergency_food(body: EmergencyFoodRequest, request: Request) -> dict:
+    """Create an emergency food assistance request."""
+    _enforce_rate_limit(request)
+
+    from backend.tools import _create_emergency_food_request
+
+    try:
+        result = await _create_emergency_food_request(
+            user_id=body.user_id,
+            urgency_level=body.urgency_level,
+            family_size=body.family_size,
+            dietary_needs=body.dietary_needs,
+            message=body.message,
+            latitude=body.latitude,
+            longitude=body.longitude,
+        )
+        return result
+    except Exception as exc:
+        logger.error("Emergency food request error: %s", exc)
+        raise HTTPException(500, "Emergency food request failed") from exc
+
+
+class MealPlanRequest(BaseModel):
+    budget_per_day: float = Field(ge=0.5, le=100)
+    family_size: int = Field(ge=1, le=20)
+    days: int = Field(default=7, ge=1, le=14)
+    dietary_restrictions: list[str] | None = None
+    cooking_equipment: str = "full_kitchen"
+    snap_eligible: bool | None = None
+
+
+@app.post("/api/meal-plan")
+async def meal_plan(body: MealPlanRequest, request: Request) -> dict:
+    """Generate a budget-friendly meal plan."""
+    _enforce_rate_limit(request)
+
+    from backend.tools import _generate_meal_plan
+
+    try:
+        result = await _generate_meal_plan(
+            budget_per_day=body.budget_per_day,
+            family_size=body.family_size,
+            days=body.days,
+            dietary_restrictions=body.dietary_restrictions,
+            cooking_equipment=body.cooking_equipment,
+            snap_eligible=body.snap_eligible,
+        )
+        return result
+    except Exception as exc:
+        logger.error("Meal plan error: %s", exc)
+        raise HTTPException(500, "Meal plan generation failed") from exc
+
+
+class NutritionAnalysisRequest(BaseModel):
+    foods: list[str] = Field(min_length=1, max_length=20)
+    servings: list[str] | None = None
+    identify_gaps: bool = True
+    health_conditions: list[str] | None = None
+
+
+@app.post("/api/nutrition/analyze")
+async def nutrition_analyze(body: NutritionAnalysisRequest, request: Request) -> dict:
+    """Analyze nutritional content and identify gaps."""
+    _enforce_rate_limit(request)
+
+    from backend.tools import _analyze_nutrition
+
+    try:
+        result = await _analyze_nutrition(
+            foods=body.foods,
+            servings=body.servings,
+            identify_gaps=body.identify_gaps,
+            health_conditions=body.health_conditions,
+        )
+        return result
+    except Exception as exc:
+        logger.error("Nutrition analysis error: %s", exc)
+        raise HTTPException(500, "Nutrition analysis failed") from exc
+
+
+class FoodSafetyRequest(BaseModel):
+    food_item: str = Field(min_length=1, max_length=200)
+    concern: str = "general"
+    days_since_opened: int | None = None
+    storage_method: str | None = None
+    vulnerable_consumer: bool = False
+
+
+@app.post("/api/food-safety")
+async def food_safety(body: FoodSafetyRequest, request: Request) -> dict:
+    """Check food safety for a specific item."""
+    _enforce_rate_limit(request)
+
+    from backend.tools import _check_food_safety
+
+    try:
+        result = await _check_food_safety(
+            food_item=body.food_item,
+            concern=body.concern,
+            days_since_opened=body.days_since_opened,
+            storage_method=body.storage_method,
+            vulnerable_consumer=body.vulnerable_consumer,
+        )
+        return result
+    except Exception as exc:
+        logger.error("Food safety check error: %s", exc)
+        raise HTTPException(500, "Food safety check failed") from exc
 
 
 # ---------------------------------------------------------------------------

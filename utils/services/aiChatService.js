@@ -18,7 +18,7 @@ class AIChatService {
    *
    * @returns {{ response: string, lang: string, audioUrl: string|null, error: null }}
    */
-  async sendMessage(message, { userId, includeAudio = false } = {}) {
+  async sendMessage(message, { userId, includeAudio = false, latitude = null, longitude = null } = {}) {
     try {
       let lastError = null
 
@@ -27,14 +27,20 @@ class AIChatService {
           const controller = new AbortController()
           const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
 
+          const payload = {
+            user_id: userId,
+            message,
+            include_audio: includeAudio,
+          }
+          if (latitude != null && longitude != null) {
+            payload.latitude = latitude
+            payload.longitude = longitude
+          }
+
           const response = await fetch(`${API_BASE}/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              user_id: userId,
-              message,
-              include_audio: includeAudio,
-            }),
+            body: JSON.stringify(payload),
             signal: controller.signal,
           })
           clearTimeout(timeout)
@@ -174,6 +180,52 @@ class AIChatService {
       }
     } catch (error) {
       console.error('Submit AI feedback error:', error)
+      reportError(error)
+      throw error
+    }
+  }
+
+  /**
+   * Send a food image for AI vision analysis.
+   *
+   * @param {string} imageDataUrl - base64 data URL (data:image/...) or https URL
+   * @param {{ analysisType?: string, userQuestion?: string, userId?: string }} options
+   * @returns {{ response: string, analysis: object, analysisType: string }}
+   */
+  async sendImage(imageDataUrl, { analysisType = 'identify', userQuestion = null, userId = null } = {}) {
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 45000)
+
+      const response = await fetch(`${API_BASE}/vision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_url: imageDataUrl,
+          analysis_type: analysisType,
+          user_question: userQuestion,
+          user_id: userId,
+        }),
+        signal: controller.signal,
+      })
+      clearTimeout(timeout)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('AI vision error:', response.status, errorText)
+        throw new Error(`Vision service error: ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      return {
+        response: data.response,
+        analysis: data.analysis || {},
+        analysisType: data.analysis_type || analysisType,
+        error: null,
+      }
+    } catch (error) {
+      console.error('AI vision service error:', error)
       reportError(error)
       throw error
     }

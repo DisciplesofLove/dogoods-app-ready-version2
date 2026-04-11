@@ -58,7 +58,145 @@
     "how_to_find": "Visit the 'Find Food' page to browse available food in your area. You can filter by food type, distance, and dietary preferences. When you find something you'd like, click 'Claim' and arrange pickup with the sharer.",
     "is_it_safe": "All food shared on DoGoods should meet basic safety standards. Check expiry dates, storage conditions, and ingredient labels. If you ever have concerns about a listing, please report it and our team will review it promptly.",
     "what_can_share": "You can share almost any type of food — fresh produce, canned goods, bakery items, prepared meals, dairy products, and more. The key requirements are: the food must be safe to consume, properly stored, and accurately described.",
-    "how_impact_works": "Every food share on DoGoods automatically calculates environmental impact — how much water was saved, CO2 emissions prevented, and land preserved by not wasting that food. You can see your personal impact on your dashboard!"
+    "how_impact_works": "Every food share on DoGoods automatically calculates environmental impact — how much water was saved, CO2 emissions prevented, and land preserved by not wasting that food. You can see your personal impact on your dashboard!",
+    "find_food_help": "If you need food assistance beyond what's available on DoGoods, I can help you find community resources like food banks, pantries, SNAP/WIC offices, and soup kitchens near you. Just ask me to 'find community resources' or 'find food banks near me' and I'll search our database.",
+    "recipe_help": "I can suggest recipes based on ingredients you have! Just tell me what ingredients you have available and I'll create practical, nutritious recipes. I can also consider dietary restrictions and cuisine preferences.",
+    "image_help": "You can send me a photo of food and I'll help you identify items, suggest recipes, check food safety, estimate nutrition, or read labels. Just tap the camera icon in the chat to upload an image.",
+    "storage_tips": "Not sure how to store food to keep it fresh longer? Ask me about any food item and I'll give you detailed storage tips including shelf life, optimal temperature, container recommendations, and signs of spoilage.",
+    "benefits_help": "I can check if you qualify for food assistance programs like SNAP (food stamps), WIC, school meals, Meals on Wheels, and more. Just tell me your household size and approximate monthly income, and I'll estimate your eligibility for each program with application instructions.",
+    "emergency_food": "If you need food right now, I can help immediately. I'll search for available food near you, find nearby food banks and pantries, and create an emergency request. You can also call 211 anytime (24/7) or the National Hunger Hotline at 1-866-348-6479.",
+    "meal_planning": "I can create a budget-friendly weekly meal plan for your family. Tell me your daily budget per person, family size, any dietary restrictions, and what cooking equipment you have. I'll generate a full week of nutritious meals with grocery lists and cost estimates.",
+    "nutrition_help": "Send me a list of foods you've been eating and I'll analyze the nutritional content, identify any gaps (like iron, calcium, or vitamin deficiencies), and suggest affordable foods to fill those gaps.",
+    "food_safety_help": "Wondering if food is still safe to eat? Tell me what food it is, how long it's been opened, and how it was stored. I'll give you a safety assessment with guidance. If you're pregnant, elderly, or have a weak immune system, let me know for extra-cautious advice.",
+    "dietary_alternatives": "Need alternatives for food allergies, religious dietary laws, or medical diets? Tell me what food you need to replace and your dietary restrictions. I'll suggest safe, affordable substitutes with preparation tips.",
+    "child_programs": "I can help find nutrition programs for children: school breakfast/lunch, summer feeding sites, afterschool snack programs, WIC for kids under 5, Head Start, and backpack programs that send food home for weekends.",
+    "senior_programs": "For seniors 60+, I can help find: Meals on Wheels (home-delivered meals), congregate meals at senior centers, CSFP food boxes, farmers market coupons, and SNAP benefits.",
+    "food_preservation": "Got a big donation from the food bank? I can help you preserve it! I'll give you step-by-step instructions for freezing, canning, dehydrating, or pickling — plus batch cooking ideas to make it all last."
+  },
+
+  "community_resources": {
+    "description": "Community resources include food banks, pantries, SNAP offices, WIC offices, soup kitchens, shelters, and other food assistance programs. When users ask about food assistance, help them find local resources.",
+    "national_hotlines": [
+      "211 — National helpline for local food assistance",
+      "USDA National Hunger Hotline: 1-866-3-HUNGRY (1-866-348-6479)",
+      "Feeding America food bank locator: feedingamerica.org/find-your-local-foodbank"
+    ],
+    "programs": [
+      "SNAP (Supplemental Nutrition Assistance Program) — EBT benefits for eligible families. Apply at fns.usda.gov/snap",
+      "WIC (Women, Infants, and Children) — Nutrition assistance for pregnant/breastfeeding women and children under 5. Apply at fns.usda.gov/wic",
+      "National School Lunch Program — Free or reduced-price meals for eligible children",
+      "Commodity Supplemental Food Program (CSFP) — Monthly food packages for seniors 60+",
+      "The Emergency Food Assistance Program (TEFAP) — Government commodities distributed through food banks"
+    ],
+    "guidance": "Always be compassionate when discussing food insecurity. Never make assumptions about why someone needs food help. Provide practical information and multiple options. If our database has no nearby results, always share the national hotline numbers and web resources."
+  },
+
+  "government_programs": {
+    "snap": {
+      "name": "SNAP (Supplemental Nutrition Assistance Program)",
+      "also_known_as": "Food Stamps, EBT",
+      "eligibility": "Gross income ≤130% Federal Poverty Level. Net income ≤100% FPL. Assets ≤$2750 ($4250 if elderly/disabled). Many states have expanded eligibility up to 200% FPL.",
+      "benefits": "Monthly EBT card loaded with funds to buy groceries at most stores, some farmers markets",
+      "apply": "Online at your state's SNAP portal, in person at your local Department of Social Services, or by calling 1-800-221-5689",
+      "key_facts": [
+        "Application takes 30 days (7 days for expedited/emergency cases)",
+        "You can apply even if you're working — many workers qualify",
+        "Students, seniors, and people with disabilities have special rules",
+        "SNAP does NOT count as public charge for immigration purposes",
+        "Your EBT card works at most grocery stores and some farmers markets",
+        "SNAP Double Up programs double your money at farmers markets in many states"
+      ]
+    },
+    "wic": {
+      "name": "WIC (Women, Infants, and Children)",
+      "eligibility": "Pregnant women, new mothers (up to 1 year postpartum), breastfeeding mothers (up to child's 1st birthday), infants and children under 5. Income ≤185% FPL.",
+      "benefits": "Monthly food vouchers for milk, eggs, cheese, cereal, juice, fruits/vegetables, whole grains, infant formula, baby food, peanut butter",
+      "apply": "Find your local WIC clinic at fns.usda.gov/wic or call your state WIC office",
+      "key_facts": [
+        "Auto-qualifies if you receive SNAP, Medicaid, or TANF",
+        "Fathers and guardians can apply on behalf of children",
+        "WIC provides nutrition education and breastfeeding support",
+        "WIC is NOT welfare — it's a nutrition program",
+        "Available regardless of immigration status for eligible children born in the US"
+      ]
+    },
+    "school_meals": {
+      "name": "National School Lunch & Breakfast Program",
+      "eligibility": "Free meals: income ≤130% FPL. Reduced-price ($0.30-$0.40): 130-185% FPL. Some schools offer free meals to all students.",
+      "summer_meals": "When school is out, free summer meals are available at parks, libraries, schools, and community centers. Text 'FOOD' to 304-304 to find sites.",
+      "key_facts": [
+        "Apply through your child's school",
+        "Children automatically qualify if family receives SNAP",
+        "Many schools now offer Community Eligibility (free meals for ALL students)",
+        "Backpack programs send food home for weekends"
+      ]
+    },
+    "senior_programs": {
+      "meals_on_wheels": "Hot meals delivered to homebound adults 60+. Most programs don't check income. Call 1-888-998-6325 or visit mealsonwheelsamerica.org",
+      "congregate_meals": "Free or low-cost meals served at senior centers and community buildings for adults 60+. Also provides social connection.",
+      "csfp": "Monthly food boxes for seniors 60+ with income ≤130% FPL. Includes canned goods, cereal, pasta, cheese, peanut butter.",
+      "senior_farmers_market": "Coupons for fresh produce at farmers markets for seniors 60+ with income ≤185% FPL"
+    }
+  },
+
+  "emergency_food_guidance": {
+    "immediate_steps": [
+      "Call 211 — available 24/7 in every US community for food referrals",
+      "Call the National Hunger Hotline: 1-866-348-6479 (Mon-Fri 7am-10pm ET)",
+      "Visit feedingamerica.org/find-your-local-foodbank to find the nearest food bank",
+      "Text 'FOOD' or 'COMIDA' to 304-304 to find free meal sites near you",
+      "Many food banks and pantries serve same-day — no appointment, no ID, no proof of income needed",
+      "Salvation Army and many churches offer free meals — call ahead for schedule"
+    ],
+    "crisis_resources": [
+      "If you or a child is in immediate danger, call 911",
+      "Crisis Text Line: Text HOME to 741741",
+      "If facing homelessness + hunger, call 211 for comprehensive referrals"
+    ],
+    "key_message": "There is NO shame in asking for food help. Millions of Americans use food assistance every day. You deserve to eat."
+  },
+
+  "budget_meal_planning": {
+    "tips": [
+      "Rice and beans together = complete protein for about $0.50/serving",
+      "Eggs are one of the best protein values at ~$0.25 per egg",
+      "Buy whole chickens ($1-2/lb) instead of parts ($4-5/lb) — use bones for soup",
+      "Frozen vegetables are just as nutritious as fresh and cost 50-70% less",
+      "Oatmeal with peanut butter = filling breakfast for ~$0.30",
+      "Dried beans cost 50-75% less than canned (soak overnight, cook in bulk)",
+      "Buy store brands — identical quality at 20-40% less cost",
+      "Shop seasonal produce — it's cheaper and more nutritious",
+      "Use SNAP at farmers markets — many offer SNAP Match/Double Up programs",
+      "Batch cook on weekends and freeze portions for the week",
+      "Potatoes are incredibly affordable and nutritious — bake, mash, roast, or make soup",
+      "Cabbage is one of the cheapest vegetables and lasts 2+ weeks in the fridge"
+    ],
+    "no_kitchen_options": [
+      "Peanut butter + bread + banana",
+      "Canned tuna + crackers",
+      "Trail mix (nuts, dried fruit, cereal)",
+      "Fresh fruit + cheese",
+      "Yogurt + granola",
+      "Hummus + vegetables + pita",
+      "Pre-made salads from food banks"
+    ]
+  },
+
+  "food_safety_knowledge": {
+    "fridge_temps": "Keep refrigerator at 40°F (4°C) or below. Freezer at 0°F (-18°C).",
+    "two_hour_rule": "Don't leave perishable food at room temperature for more than 2 hours (1 hour if above 90°F/32°C).",
+    "reheating": "Reheat leftovers to 165°F (74°C). Soups, sauces, and gravies should reach a rolling boil.",
+    "vulnerable_groups": "Pregnant women, young children, elderly, and immunocompromised people should avoid: raw sprouts, unpasteurized dairy, deli meats (unless heated), raw eggs, raw fish"
+  },
+
+  "dietary_alternatives": {
+    "dairy_free": ["Oat milk", "Soy milk", "Coconut yogurt", "Nutritional yeast (cheese flavor)"],
+    "gluten_free": ["Rice", "Corn tortillas", "Potatoes", "Certified GF oats", "Quinoa"],
+    "nut_free": ["Sunflower seed butter", "Soy butter", "Pumpkin seeds", "Tahini"],
+    "halal": "Look for halal-certified labels. Avoid gelatin, lard, alcohol-based vanilla extract. Use halal-certified meat.",
+    "kosher": "Look for OU, OK, or Star-K certification. Separate meat and dairy. No pork or shellfish.",
+    "diabetic_friendly": "Prioritize: whole grains, leafy greens, beans, lean protein. Limit: white bread, sugary drinks, processed snacks.",
+    "renal_diet": "Limit: potassium (bananas, oranges, potatoes), phosphorus (dairy, nuts), sodium. Work with a dietitian."
   },
 
   "response_examples": {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuthContext } from '../AuthContext.jsx'
 import aiChatService from '../services/aiChatService.js'
 
@@ -23,6 +23,22 @@ export function useAIChat() {
   const [error, setError] = useState(null)
   const [language, setLanguage] = useState('en')
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const locationRef = useRef({ latitude: null, longitude: null })
+
+  // Auto-detect user location once (non-blocking)
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        locationRef.current = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        }
+      },
+      () => { /* permission denied or error — silent */ },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+    )
+  }, [])
 
   // Load conversation history from backend when user logs in
   useEffect(() => {
@@ -70,6 +86,8 @@ export function useAIChat() {
     try {
       const result = await aiChatService.sendMessage(text.trim(), {
         userId: user?.id || 'anonymous',
+        latitude: locationRef.current.latitude,
+        longitude: locationRef.current.longitude,
       })
 
       // Update language from backend detection
@@ -180,10 +198,66 @@ export function useAIChat() {
     }
   }, [isAuthenticated, user?.id])
 
+  /**
+   * Send a food image for vision analysis.
+   * @param {string} imageDataUrl - base64 data:image/... or https:// URL
+   * @param {{ analysisType?: string, userQuestion?: string }} options
+   */
+  const sendImage = useCallback(async (imageDataUrl, { analysisType = 'identify', userQuestion = null } = {}) => {
+    if (isLoading || !imageDataUrl) return
+
+    const userMsg = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      message: userQuestion || '📷 [Sent a food image for analysis]',
+      imageUrl: imageDataUrl,
+      timestamp: new Date().toISOString(),
+    }
+
+    setMessages(prev => [...prev, userMsg])
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const result = await aiChatService.sendImage(imageDataUrl, {
+        analysisType,
+        userQuestion,
+        userId: user?.id || 'anonymous',
+      })
+
+      const assistantMsg = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        message: result.response,
+        analysis: result.analysis,
+        analysisType: result.analysisType,
+        timestamp: new Date().toISOString(),
+      }
+
+      setMessages(prev => [...prev, assistantMsg])
+    } catch (err) {
+      const errorMsg = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        message: language === 'es'
+          ? 'No pude analizar la imagen. Por favor intenta de nuevo.'
+          : "I couldn't analyze the image right now. Please try again.",
+        isError: true,
+        timestamp: new Date().toISOString(),
+      }
+
+      setMessages(prev => [...prev, errorMsg])
+      setError(err.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [isLoading, language, user?.id])
+
   return {
     messages,
     sendMessage,
     sendVoice,
+    sendImage,
     isLoading,
     error,
     language,
