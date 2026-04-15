@@ -108,6 +108,8 @@ function FoodForm({
     const [imagePreview, setImagePreview] = useState(null);
     const [submitError, setSubmitError] = useState(null);
     const [geocodeTimeout, setGeocodeTimeout] = useState(null);
+    const [aiAnalysis, setAiAnalysis] = useState(null);
+    const [aiAnalyzing, setAiAnalyzing] = useState(false);
 
     useEffect(() => {
         if (initialData?.image_url) {
@@ -227,6 +229,37 @@ function FoodForm({
                 ...prev,
                 image: null
             }));
+
+            // AI food image analysis (non-blocking)
+            analyzeImageWithAI(file);
+        }
+    };
+
+    const analyzeImageWithAI = async (file) => {
+        setAiAnalyzing(true);
+        setAiAnalysis(null);
+        try {
+            const reader = new FileReader();
+            const base64 = await new Promise((resolve) => {
+                reader.onloadend = () => resolve(reader.result.split(",")[1]);
+                reader.readAsDataURL(file);
+            });
+            const res = await fetch(`${API_CONFIG.BACKEND_URL}/api/ai/analyze-food-image`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ image_base64: base64 }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            setAiAnalysis(data);
+            // Auto-populate category if empty and AI detected one
+            if (data.category && !formData.category) {
+                setFormData(prev => ({ ...prev, category: data.category }));
+            }
+        } catch (err) {
+            console.warn("AI image analysis unavailable:", err.message);
+        } finally {
+            setAiAnalyzing(false);
         }
     };
 
@@ -819,6 +852,36 @@ function FoodForm({
                                 alt="Current food item" 
                                 className="h-32 w-32 object-cover rounded-lg border border-primary-200 shadow-sm"
                             />
+                        </div>
+                    )}
+                    {/* AI Analysis Result */}
+                    {aiAnalyzing && (
+                        <div className="mt-2 flex items-center gap-2 text-sm text-blue-600">
+                            <i className="fas fa-spinner fa-spin"></i>
+                            AI is analyzing your food photo...
+                        </div>
+                    )}
+                    {aiAnalysis && !aiAnalyzing && (
+                        <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+                            <div className="font-medium text-blue-800 mb-1">🤖 AI Analysis</div>
+                            {aiAnalysis.food_type && (
+                                <p className="text-blue-700">Detected: <strong>{aiAnalysis.food_type}</strong></p>
+                            )}
+                            {aiAnalysis.condition && (
+                                <p className="text-blue-700">Condition: {aiAnalysis.condition}</p>
+                            )}
+                            {aiAnalysis.category && (
+                                <p className="text-blue-700">
+                                    Suggested category: <strong>{aiAnalysis.category}</strong>
+                                    {!formData.category && " (auto-applied)"}
+                                </p>
+                            )}
+                            {aiAnalysis.safety_warning && (
+                                <p className="text-amber-700 mt-1">
+                                    <i className="fas fa-exclamation-triangle mr-1"></i>
+                                    {aiAnalysis.safety_warning}
+                                </p>
+                            )}
                         </div>
                     )}
                 </div>

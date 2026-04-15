@@ -1,14 +1,14 @@
 import React from "react";
 import Avatar from "./Avatar";
 import Button from "./Button";
-import { useAuth } from "../../utils/hooks/useSupabase";
+import { useAuth, useNotifications } from "../../utils/hooks/useSupabase";
 import { useNavigate } from 'react-router-dom';
 import { useTutorial } from '../../utils/TutorialContext';
 import PropTypes from 'prop-types';
 
 function Header({
     menuItems = [
-        // { label: 'Share Food', path: '/share' }, // TEMPORARILY DISABLED
+        { label: 'Share Food', path: '/share' },
         { label: 'Find Food', path: '/find' },
         { 
             label: 'Support Us', 
@@ -26,6 +26,7 @@ function Header({
     const { user: authUser, isAuthenticated, signOut } = useAuth();
     const navigate = useNavigate();
     const { startTutorial } = useTutorial();
+    const { unreadCount } = useNotifications(authUser?.id);
     
     const [isMenuOpen, setIsMenuOpen] = React.useState(false);
     const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
@@ -175,6 +176,22 @@ function Header({
                         >
                             ?
                         </button>
+                        {/* Notification bell */}
+                        {isAuthenticated && (
+                            <a
+                                href="/notifications"
+                                className="relative w-8 h-8 flex items-center justify-center text-gray-500 hover:text-[#2CABE3] transition-colors duration-200"
+                                title="Notifications"
+                                aria-label="Notifications"
+                            >
+                                <i className="fas fa-bell text-lg"></i>
+                                {unreadCount > 0 && (
+                                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                                        {unreadCount > 9 ? '9+' : unreadCount}
+                                    </span>
+                                )}
+                            </a>
+                        )}
                         {isAuthenticated ? (
                             <div 
                                 className="relative group"
@@ -388,6 +405,21 @@ function Header({
                                                     onClick={() => setIsMenuOpen(false)}
                                                 >
                                                     Settings
+                                                </a>
+                                            </li>
+                                            <li>
+                                                <a
+                                                    href="/notifications"
+                                                    className="block px-4 py-2 text-gray-700 hover:bg-[#2CABE3]/10 hover:text-[#2CABE3] rounded-lg"
+                                                    onClick={() => setIsMenuOpen(false)}
+                                                >
+                                                    <i className="fas fa-bell mr-2"></i>
+                                                    Notifications
+                                                    {unreadCount > 0 && (
+                                                        <span className="ml-2 bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5">
+                                                            {unreadCount > 9 ? '9+' : unreadCount}
+                                                        </span>
+                                                    )}
                                                 </a>
                                             </li>
                                             <li>

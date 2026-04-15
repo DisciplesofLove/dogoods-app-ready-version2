@@ -21,7 +21,8 @@ function FoodCard({
     onTrade,
     className = '',
     showReturnButton = false,
-    distance
+    distance,
+    matchScore
 }) {
     const { getRecipeSuggestions, isLoading: aiLoading } = useAI();
     const [showAITips, setShowAITips] = React.useState(false);
@@ -124,9 +125,32 @@ function FoodCard({
                         </div>
                     </div>
                     <div className="flex items-center space-x-2 flex-wrap gap-2">
+                        {/* AI Match Score Badge */}
+                        {matchScore != null && matchScore > 0 && (
+                            <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
+                                    matchScore >= 80 ? 'bg-green-100 text-green-800' :
+                                    matchScore >= 50 ? 'bg-blue-100 text-blue-800' :
+                                    'bg-gray-100 text-gray-700'
+                                }`}
+                                title="AI Match Score based on your location, preferences, and urgency"
+                            >
+                                🎯 {matchScore}% match
+                            </span>
+                        )}
                         <UrgencyIndicator foodListing={food} />
                         {food.verification_status && (
                             <VerificationStatus status={food.verification_status} compact={true} />
+                        )}
+                        {food.ai_verified && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700" title="This listing was verified by AI">
+                                ✅ AI Verified
+                            </span>
+                        )}
+                        {food.ai_safety_warning && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700" title={food.ai_safety_warning}>
+                                ⚠️ Check freshness
+                            </span>
                         )}
                         <span
                             className={`badge badge-${expirationStatus.status}`}

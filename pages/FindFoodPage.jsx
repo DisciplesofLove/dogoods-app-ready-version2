@@ -9,6 +9,7 @@ import { useFoodListings, useSearch } from "../utils/hooks/useSupabase";
 import { useGeoLocation } from "../utils/hooks/useLocation";
 import { useAuthContext } from "../utils/AuthContext";
 import UrgencyService from "../utils/urgencyService";
+import { API_CONFIG } from "../utils/config";
 
 // Category mapping for URL parameters
 const CATEGORY_MAPPING = {
@@ -45,11 +46,12 @@ function FindFoodPage({ initialCategory }) {
     
     const [searchTerm, setSearchTerm] = useState('');
     const [isSearchActive, setIsSearchActive] = useState(false);
+    const [matchScores, setMatchScores] = useState({});
     const [filters, setFilters] = useState({
         category: initialCategory || '',
         type: 'all',
         radius: '10',
-        sortBy: 'newest',
+        sortBy: 'bestMatch',
         community: ''
     });
     // Initial data load and category/community from URL
@@ -79,6 +81,56 @@ function FindFoodPage({ initialCategory }) {
             setFilters(prev => ({ ...prev, community: String(user.community_id) }));
         }
     }, [user?.community_id]);
+
+    // Fetch AI match scores when listings load
+    useEffect(() => {
+        if (!foods?.length || !isAuthenticated) return;
+
+        const fetchMatchScores = async () => {
+            try {
+                const backendUrl = API_CONFIG.BACKEND_URL || '';
+                const request = {
+                    latitude: currentLocation?.latitude || null,
+                    longitude: currentLocation?.longitude || null,
+                    dietary_preferences: user?.dietary_preferences || [],
+                    user_id: user?.id,
+                };
+                const response = await fetch(`${backendUrl}/api/ai/match-advanced`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        request,
+                        offers: foods.map(f => ({
+                            id: f.id,
+                            title: f.title,
+                            description: f.description,
+                            category: f.category,
+                            latitude: f.latitude || f.location?.latitude,
+                            longitude: f.longitude || f.location?.longitude,
+                            expiry_date: f.expiry_date,
+                            dietary_tags: f.dietary_tags,
+                        })),
+                    }),
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    const scores = {};
+                    (data.matches || data).forEach(m => {
+                        scores[m.offer?.id || m.id] = {
+                            score: Math.round((m.score || 0) * 100),
+                            breakdown: m.breakdown || {},
+                        };
+                    });
+                    setMatchScores(scores);
+                }
+            } catch (err) {
+                // Silently fail — match scores are a nice-to-have enhancement
+                console.warn('AI match scoring unavailable:', err.message);
+            }
+        };
+
+        fetchMatchScores();
+    }, [foods, currentLocation, isAuthenticated, user?.id]);
 
     // Event handlers
     const handleSearch = async () => {
@@ -189,11 +241,29 @@ function FindFoodPage({ initialCategory }) {
         if (filters.sortBy === 'urgency') {
             // Sort by urgency (most urgent first)
             result = UrgencyService.sortByUrgency(result);
+        } else if (filters.sortBy === 'bestMatch') {
+            // Sort by AI match score (highest first), fallback to urgency
+            result.sort((a, b) => {
+                const scoreA = matchScores[a.id]?.score || 0;
+                const scoreB = matchScores[b.id]?.score || 0;
+                if (scoreB !== scoreA) return scoreB - scoreA;
+                // Tie-break by urgency
+                const urgA = UrgencyService.getDeadline(a)?.getTime() || Infinity;
+                const urgB = UrgencyService.getDeadline(b)?.getTime() || Infinity;
+                return urgA - urgB;
+            });
         } else if (filters.sortBy === 'distance' && currentLocation) {
             // Already sorted by distance above
         } else if (filters.sortBy === 'newest') {
             result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         }
+
+        // Attach match scores to food objects for display
+        result = result.map(food => ({
+            ...food,
+            _matchScore: matchScores[food.id]?.score ?? null,
+            _matchBreakdown: matchScores[food.id]?.breakdown ?? null,
+        }));
 
         // If we have search results with scores, sort by them
         if (isSearchActive && searchResults.length > 0) {
@@ -209,7 +279,7 @@ function FindFoodPage({ initialCategory }) {
         }
 
         return result;
-    }, [foods, searchResults, isSearchActive, searchTerm, filters]);
+    }, [foods, searchResults, isSearchActive, searchTerm, filters, matchScores, currentLocation]);
 
     const LoadingSpinner = () => (
         <div className="text-center py-12" role="status">
@@ -312,7 +382,9 @@ function FindFoodPage({ initialCategory }) {
                             className="border border-gray-300 rounded px-4 py-2 w-full md:w-48"
                             aria-label="Sort by"
                         >
+                            <option value="bestMatch">🎯 Best Match</option>
                             <option value="newest">🆕 Newest First</option>
+                            <option value="urgency">🚨 Most Urgent</option>
                             <option value="distance">📍 Nearest</option>
                         </select>
                     </div>
@@ -352,6 +424,8 @@ function FindFoodPage({ initialCategory }) {
                                     <FoodCard
                                         food={food}
                                         onClaim={handleClaim}
+                                        distance={food.distance}
+                                        matchScore={food._matchScore}
                                     />
                                 </div>
                             ))

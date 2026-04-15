@@ -358,6 +358,7 @@ function AIChatPanel() {
     activeTools,
     error,
     language,
+    setLanguage,
     clearHistory,
     submitFeedback,
     isAuthenticated,
@@ -882,7 +883,7 @@ function AIChatPanel() {
           <button
             onClick={() => {
               const newLang = language === 'es' ? 'en' : 'es'
-              sendMessage(newLang === 'es' ? 'Hola, habla en español por favor' : 'Hi, please speak in English')
+              setLanguage(newLang)
             }}
             className="text-cyan-300/60 hover:text-cyan-300 text-xs px-2 py-1 rounded hover:bg-cyan-500/10 transition-colors border border-transparent hover:border-cyan-500/20"
             title={language === 'es' ? 'Switch to English' : 'Cambiar a Español'}
@@ -1108,12 +1109,12 @@ function AIChatPanel() {
         {messages.length <= 1 && !isLoading && (
           <div className="mt-4 animate-fadeIn">
             <p className="text-xs text-slate-500 mb-2 px-1">{language === 'es' ? 'Prueba preguntar:' : 'Try asking:'}</p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-wrap gap-1.5">
               {quickActions.slice(0, 8).map((action, i) => (
                 <button
                   key={i}
                   onClick={() => handleQuickAction(action.message)}
-                  className="text-left text-xs bg-slate-700/30 hover:bg-cyan-500/15 text-slate-300 hover:text-cyan-200 px-3 py-2.5 rounded-xl transition-all duration-200 border border-slate-600/20 hover:border-cyan-500/30 hover:shadow-sm hover:shadow-cyan-500/10"
+                  className="text-xs bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 px-3 py-1.5 rounded-full transition-all border border-cyan-500/20 hover:border-cyan-400/40 hover:shadow-sm hover:shadow-cyan-500/10"
                 >
                   {action.label}
                 </button>
@@ -1124,23 +1125,6 @@ function AIChatPanel() {
 
         <div ref={messagesEndRef} />
       </div>
-
-      {/* Quick actions — show when conversation just started */}
-      {messages.length <= 2 && !isLoading && (
-        <div className="px-4 pb-2 flex-shrink-0">
-          <div className="flex flex-wrap gap-1.5">
-            {quickActions.map((qa, i) => (
-              <button
-                key={i}
-                onClick={() => handleQuickAction(qa.message)}
-                className="text-xs bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 px-3 py-1.5 rounded-full transition-all border border-cyan-500/20 hover:border-cyan-400/40 hover:shadow-sm hover:shadow-cyan-500/10"
-              >
-                {qa.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Input area */}
       <form onSubmit={handleSend} className="border-t border-cyan-500/20 px-3 py-2.5 flex items-end gap-2 flex-shrink-0 bg-slate-900/80 backdrop-blur-sm">

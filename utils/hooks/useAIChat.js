@@ -18,14 +18,43 @@ const INITIAL_MESSAGE_ES = {
 
 export function useAIChat() {
   const { user, isAuthenticated } = useAuthContext()
-  const [messages, setMessages] = useState([INITIAL_MESSAGE])
+  
+  // Load language from localStorage on init
+  const [language, setLanguageState] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('nouri_language') || 'en'
+    }
+    return 'en'
+  })
+
+  // Set initial message based on loaded language
+  const initialMsg = language === 'es' ? INITIAL_MESSAGE_ES : INITIAL_MESSAGE
+  const [messages, setMessages] = useState([initialMsg])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [language, setLanguage] = useState('en')
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
   const [activeTools, setActiveTools] = useState([]) // tools currently being called
   const abortRef = useRef(null)
+
+  // Wrapper for setLanguage that persists to localStorage
+  const setLanguage = useCallback((lang) => {
+    setLanguageState(lang)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('nouri_language', lang)
+    }
+  }, [])
+
+  // Update welcome message when language changes
+  useEffect(() => {
+    setMessages(prev => {
+      if (prev.length === 0) return prev
+      const firstMsg = prev[0]
+      if (firstMsg.id !== 'welcome') return prev
+      const newWelcome = language === 'es' ? INITIAL_MESSAGE_ES : INITIAL_MESSAGE
+      return [newWelcome, ...prev.slice(1)]
+    })
+  }, [language])
 
   // Load conversation history from backend when user logs in
   useEffect(() => {

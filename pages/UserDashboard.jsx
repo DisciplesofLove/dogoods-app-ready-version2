@@ -4,6 +4,8 @@ import Button from "../components/common/Button";
 import Avatar from "../components/common/Avatar";
 import Card from "../components/common/Card";
 import Receipt from "../components/common/Receipt";
+import AISuggestions from "../components/user/AISuggestions";
+import ImpactStats from "../components/user/ImpactStats";
 import { useAuth, useFoodListings, useNotifications } from "../utils/hooks/useSupabase";
 import supabase from "../utils/supabaseClient";
 
@@ -108,7 +110,6 @@ function UserDashboard() {
 
     // Quick actions
     const quickActions = [
-        /* TEMPORARILY DISABLED
         {
             title: 'Share Food',
             description: 'Share your surplus food',
@@ -116,7 +117,6 @@ function UserDashboard() {
             path: '/share',
             color: 'bg-[#2CABE3]'
         },
-        */
         {
             title: 'Find Food',
             description: 'Browse available items',
@@ -318,6 +318,12 @@ function UserDashboard() {
                         </div>
                     </Card>
                 </div>
+            </div>
+
+            {/* AI Suggestions & Impact Stats */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+                <AISuggestions userId={authUser?.id} />
+                <ImpactStats userId={authUser?.id} />
             </div>
 
             {/* Notifications */}

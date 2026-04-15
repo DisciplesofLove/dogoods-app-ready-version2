@@ -233,21 +233,270 @@ async def _reminder_loop() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Auto-match notification job (runs every 30 min)
+# ---------------------------------------------------------------------------
+
+AUTO_MATCH_INTERVAL = int(os.getenv("AUTO_MATCH_INTERVAL", "1800"))  # 30 min
+EXPIRY_CHECK_INTERVAL = int(os.getenv("EXPIRY_CHECK_INTERVAL", "3600"))  # 1 hour
+MAX_NOTIFICATIONS_PER_USER_PER_DAY = 3
+
+
+async def process_auto_matches() -> int:
+    """Find food listings expiring within 48h, match to nearby users, create notifications."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return 0
+
+    processed = 0
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+    try:
+        # Fetch active listings expiring within 48 hours
+        listings = await supabase_get("food_listings", {
+            "status": "eq.available",
+            "select": "id,title,category,location,latitude,longitude,expiry_date,user_id",
+            "order": "expiry_date.asc",
+            "limit": "50",
+        })
+    except Exception as exc:
+        logger.error("Auto-match listing fetch failed: %s", exc)
+        return 0
+
+    if not listings:
+        return 0
+
+    for listing in listings:
+        listing_id = listing.get("id")
+        lat = listing.get("latitude")
+        lng = listing.get("longitude")
+        if not lat or not lng:
+            continue
+
+        try:
+            # Find nearby users who might want this food (within ~10km)
+            users = await supabase_get("users", {
+                "select": "id,name,phone,sms_opt_in,latitude,longitude,dietary_preferences",
+                "limit": "50",
+            })
+        except Exception as exc:
+            logger.error("User fetch for auto-match failed: %s", exc)
+            continue
+
+        # Filter users who are nearby and not the listing owner
+        matched_users = []
+        for u in users:
+            if u.get("id") == listing.get("user_id"):
+                continue
+            u_lat = u.get("latitude")
+            u_lng = u.get("longitude")
+            if not u_lat or not u_lng:
+                continue
+            # Simple distance check (~10km in degrees)
+            if abs(float(u_lat) - float(lat)) < 0.09 and abs(float(u_lng) - float(lng)) < 0.09:
+                matched_users.append(u)
+
+        for user in matched_users[:5]:  # Top 5 nearby users
+            user_id = user.get("id")
+            try:
+                # Check if already notified about this listing
+                existing = await supabase_get("notifications", {
+                    "user_id": f"eq.{user_id}",
+                    "listing_id": f"eq.{listing_id}",
+                    "select": "id",
+                    "limit": "1",
+                })
+                if existing:
+                    continue
+
+                # Check daily notification cap
+                today_start = datetime.now(timezone.utc).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                ).isoformat()
+                today_notifications = await supabase_get("notifications", {
+                    "user_id": f"eq.{user_id}",
+                    "created_at": f"gte.{today_start}",
+                    "select": "id",
+                })
+                if len(today_notifications) >= MAX_NOTIFICATIONS_PER_USER_PER_DAY:
+                    continue
+
+                # Create notification
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.post(
+                        f"{SUPABASE_URL}/rest/v1/notifications",
+                        json={
+                            "user_id": user_id,
+                            "type": "food_match",
+                            "title": f"🍎 Food available near you!",
+                            "message": f"{listing.get('title', 'Food')} is available nearby. Claim it before it expires!",
+                            "listing_id": listing_id,
+                            "read": False,
+                        },
+                        headers=headers,
+                    )
+                processed += 1
+
+                # Send SMS for high-urgency matches
+                if user.get("sms_opt_in") and user.get("phone"):
+                    sms_body = f"[DoGoods] 🍎 {listing.get('title', 'Food')} is available near you! Open the app to claim it."
+                    await send_sms_via_twilio(user["phone"], sms_body)
+
+            except Exception as exc:
+                logger.error("Auto-match notification error for user %s: %s", user_id, exc)
+
+    if processed:
+        logger.info("Auto-match: created %d notification(s)", processed)
+    return processed
+
+
+async def process_expiring_listings() -> int:
+    """Mark expired listings, send last-chance alerts for items expiring within 6 hours."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return 0
+
+    processed = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+    try:
+        # Mark listings past expiry as expired
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.patch(
+                f"{SUPABASE_URL}/rest/v1/food_listings",
+                params={
+                    "status": "eq.available",
+                    "expiry_date": f"lte.{now_iso}",
+                },
+                json={"status": "expired"},
+                headers=headers,
+            )
+            if resp.status_code < 300:
+                expired_items = resp.json() if resp.text else []
+                if expired_items:
+                    logger.info("Marked %d listing(s) as expired", len(expired_items))
+                    processed += len(expired_items)
+    except Exception as exc:
+        logger.error("Expiry processing error: %s", exc)
+
+    # Send last-chance notifications for items expiring within 6 hours
+    try:
+        from datetime import timedelta
+        six_hours_later = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
+        urgent_listings = await supabase_get("food_listings", {
+            "status": "eq.available",
+            "expiry_date": f"lte.{six_hours_later}",
+            "expiry_date": f"gte.{now_iso}",
+            "select": "id,title,latitude,longitude,user_id",
+            "limit": "20",
+        })
+
+        for listing in urgent_listings:
+            listing_id = listing.get("id")
+            lat = listing.get("latitude")
+            lng = listing.get("longitude")
+            if not lat or not lng:
+                continue
+
+            users = await supabase_get("users", {
+                "select": "id,phone,sms_opt_in,latitude,longitude",
+                "limit": "50",
+            })
+
+            for user in users:
+                if user.get("id") == listing.get("user_id"):
+                    continue
+                u_lat = user.get("latitude")
+                u_lng = user.get("longitude")
+                if not u_lat or not u_lng:
+                    continue
+                if abs(float(u_lat) - float(lat)) > 0.09 or abs(float(u_lng) - float(lng)) > 0.09:
+                    continue
+
+                # Deduplicate
+                existing = await supabase_get("notifications", {
+                    "user_id": f"eq.{user['id']}",
+                    "listing_id": f"eq.{listing_id}",
+                    "type": "eq.expiry_alert",
+                    "select": "id",
+                    "limit": "1",
+                })
+                if existing:
+                    continue
+
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.post(
+                        f"{SUPABASE_URL}/rest/v1/notifications",
+                        json={
+                            "user_id": user["id"],
+                            "type": "expiry_alert",
+                            "title": "⏰ Last chance!",
+                            "message": f"{listing.get('title', 'Food')} expires in less than 6 hours. Claim it now!",
+                            "listing_id": listing_id,
+                            "read": False,
+                        },
+                        headers=headers,
+                    )
+                processed += 1
+
+    except Exception as exc:
+        logger.error("Last-chance notification error: %s", exc)
+
+    if processed:
+        logger.info("Expiry processing: %d action(s)", processed)
+    return processed
+
+
+async def _auto_match_loop() -> None:
+    """Background loop for auto-match notifications."""
+    logger.info("Auto-match job started (interval=%ds)", AUTO_MATCH_INTERVAL)
+    while True:
+        try:
+            await process_auto_matches()
+        except Exception as exc:
+            logger.error("Auto-match loop error: %s", exc)
+        await asyncio.sleep(AUTO_MATCH_INTERVAL)
+
+
+async def _expiry_loop() -> None:
+    """Background loop for expiry processing."""
+    logger.info("Expiry processing job started (interval=%ds)", EXPIRY_CHECK_INTERVAL)
+    while True:
+        try:
+            await process_expiring_listings()
+        except Exception as exc:
+            logger.error("Expiry loop error: %s", exc)
+        await asyncio.sleep(EXPIRY_CHECK_INTERVAL)
+
+
+# ---------------------------------------------------------------------------
 # FastAPI lifespan (starts/stops background tasks)
 # ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: launch background reminder job
-    task = asyncio.create_task(_reminder_loop())
-    logger.info("Background reminder job scheduled")
+    # Startup: launch background jobs
+    reminder_task = asyncio.create_task(_reminder_loop())
+    match_task = asyncio.create_task(_auto_match_loop())
+    expiry_task = asyncio.create_task(_expiry_loop())
+    logger.info("Background jobs scheduled: reminders, auto-match, expiry processing")
     yield
-    # Shutdown: cancel background task, close pooled clients
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        logger.info("Background reminder job stopped")
+    # Shutdown: cancel all background tasks, close pooled clients
+    for t in (reminder_task, match_task, expiry_task):
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
+    logger.info("Background jobs stopped")
     await close_clients()
 
 
@@ -868,6 +1117,100 @@ async def ai_donation_tips(body: DonationTipsRequest, request: Request) -> dict:
     except Exception as exc:
         logger.error("Donation tips error: %s", exc)
         raise HTTPException(500, "Donation tips generation failed") from exc
+
+
+class NotifyNewListingRequest(BaseModel):
+    listing_id: str = Field(min_length=1, max_length=128)
+
+
+@app.post("/api/ai/notify-new-listing")
+async def notify_new_listing(body: NotifyNewListingRequest, request: Request) -> dict:
+    """Notify matched users when a new food listing is approved."""
+    _enforce_rate_limit(request)
+
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        raise HTTPException(503, "Supabase not configured")
+
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+    try:
+        # Fetch the listing
+        listings = await supabase_get("food_listings", {
+            "id": f"eq.{body.listing_id}",
+            "select": "id,title,category,latitude,longitude,user_id,expiry_date",
+            "limit": "1",
+        })
+        if not listings:
+            raise HTTPException(404, "Listing not found")
+
+        listing = listings[0]
+        lat = listing.get("latitude")
+        lng = listing.get("longitude")
+        if not lat or not lng:
+            return {"notified": 0, "message": "Listing has no location data"}
+
+        # Find nearby users
+        users = await supabase_get("users", {
+            "select": "id,name,phone,sms_opt_in,latitude,longitude",
+            "limit": "100",
+        })
+
+        notified = 0
+        for user in users:
+            if user.get("id") == listing.get("user_id"):
+                continue
+            u_lat = user.get("latitude")
+            u_lng = user.get("longitude")
+            if not u_lat or not u_lng:
+                continue
+            if abs(float(u_lat) - float(lat)) > 0.09 or abs(float(u_lng) - float(lng)) > 0.09:
+                continue
+
+            # Dedup check
+            existing = await supabase_get("notifications", {
+                "user_id": f"eq.{user['id']}",
+                "listing_id": f"eq.{body.listing_id}",
+                "select": "id",
+                "limit": "1",
+            })
+            if existing:
+                continue
+
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    f"{SUPABASE_URL}/rest/v1/notifications",
+                    json={
+                        "user_id": user["id"],
+                        "type": "nearby_food",
+                        "title": "📍 New food near you!",
+                        "message": f"{listing.get('title', 'Food')} was just shared nearby. Be the first to claim it!",
+                        "listing_id": body.listing_id,
+                        "read": False,
+                    },
+                    headers=headers,
+                )
+            notified += 1
+
+            # SMS for opted-in users
+            if user.get("sms_opt_in") and user.get("phone") and notified <= 10:
+                sms_body = f"[DoGoods] 📍 {listing.get('title', 'Food')} just shared near you! Open the app to claim it."
+                await send_sms_via_twilio(user["phone"], sms_body)
+
+            if notified >= 10:
+                break
+
+        return {"notified": notified, "listing_id": body.listing_id}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Notify new listing error: %s", exc)
+        raise HTTPException(500, "Notification failed") from exc
 
 
 @app.get("/api/ai/community-insights")
