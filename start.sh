@@ -1,35 +1,15 @@
 #!/bin/bash
-set -e
+export PORT="${PORT:-8080}"
+echo "=== DoGoods startup: PORT=$PORT ==="
 
-echo "=== DoGoods Full-Stack Startup ==="
-echo "PORT=${PORT:-8080}"
-
-# 1. Inject runtime env vars into config.js (Supabase keys, etc.)
+# 1. Inject Supabase/API keys into runtime config.js
 /app/inject-config.sh
 
-# 2. Generate nginx config from template (substitutes $PORT)
-export PORT="${PORT:-8080}"
+# 2. Substitute $PORT into nginx config
 envsubst '${PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 
-# 3. Start FastAPI backend in background
-echo "Starting FastAPI backend on :8000..."
-cd /app
-python -m uvicorn backend.app:app \
-  --host 127.0.0.1 \
-  --port 8000 \
-  --log-level info &
+# 3. Validate nginx config
+nginx -t || { echo "nginx config error — check nginx.conf"; exit 1; }
 
-BACKEND_PID=$!
-
-# 4. Start nginx in foreground
-echo "Starting nginx on :${PORT}..."
-nginx -g "daemon off;" &
-NGINX_PID=$!
-
-# Wait for either process to exit
-wait -n $BACKEND_PID $NGINX_PID
-EXIT_CODE=$?
-
-echo "Process exited with code $EXIT_CODE — shutting down..."
-kill $BACKEND_PID $NGINX_PID 2>/dev/null || true
-exit $EXIT_CODE
+# 4. Launch both nginx and uvicorn via supervisord
+exec supervisord -c /etc/supervisor/conf.d/dogoods.conf

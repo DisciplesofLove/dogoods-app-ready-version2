@@ -1,14 +1,17 @@
 
 import { createClient } from '@supabase/supabase-js'
 
-// Get environment variables
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
+// Runtime env (injected by inject-config.sh into window.__ENV__ before main.jsx loads)
+// Takes priority over build-time Vite replacements so secrets stay out of the Docker image
+const _runtimeEnv = (typeof window !== 'undefined' && window.__ENV__) || {}
+
+const supabaseUrl = _runtimeEnv.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || ''
+const supabaseKey = _runtimeEnv.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
 // Validate configuration
 if (!supabaseUrl || !supabaseKey) {
   console.error('❌ Missing Supabase configuration!')
-  console.error('Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables')
+  console.error('Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Railway environment variables')
   throw new Error('Missing Supabase configuration')
 }
 
