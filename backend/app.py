@@ -55,9 +55,14 @@ logger = logging.getLogger("app")
 
 ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv(
-        "CORS_ORIGINS", "http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002"
+        "CORS_ORIGINS",
+        "http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002,http://127.0.0.1:8080"
     ).split(",")
 ]
+# In production behind nginx reverse proxy, also allow the Railway public URL
+_railway_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+if _railway_url:
+    ALLOWED_ORIGINS.append(f"https://{_railway_url}")
 
 # Twilio configuration
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
